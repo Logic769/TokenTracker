@@ -61,13 +61,24 @@ test("unchanged credentials skip rewrite after load preserves version equality",
   const { file } = await fixture(t);
   const store = createCloudDeviceTokenStore(file);
   assert.equal(store.set(binding, "device-a"), true);
-  const before = await fs.readFile(file, "utf8");
-  const mtimeBefore = (await fs.stat(file)).mtimeMs;
+  const fh = await fs.open(file, "r");
+  let before;
+  let mtimeBefore;
+  try {
+    before = await fh.readFile("utf8");
+    mtimeBefore = (await fh.stat()).mtimeMs;
+  } finally {
+    await fh.close();
+  }
   // Force a fresh store so load() goes through readCloudDeviceTokenEntry.
   const reloaded = createCloudDeviceTokenStore(file);
   assert.equal(reloaded.get(binding), "device-a");
   assert.equal(reloaded.set(binding, "device-a"), true);
-  const after = await fs.readFile(file, "utf8");
-  assert.equal(after, before);
-  assert.equal((await fs.stat(file)).mtimeMs, mtimeBefore);
+  const fh2 = await fs.open(file, "r");
+  try {
+    assert.equal(await fh2.readFile("utf8"), before);
+    assert.equal((await fh2.stat()).mtimeMs, mtimeBefore);
+  } finally {
+    await fh2.close();
+  }
 });
