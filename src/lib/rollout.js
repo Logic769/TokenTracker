@@ -2377,6 +2377,22 @@ async function parseRolloutFile({
   // (inode, size) identity is new; unchanged snapshots are skipped by the
   // caller before reaching this function.
   if (isCompressedRolloutPath(filePath)) {
+    // Mirror the uncompressed exhausted-cursor guard. When a custom
+    // publicRepoResolver disables the outer skip, an unchanged archive must
+    // not be re-parsed with retained baselines (that inflates totals).
+    if (startOffset >= endOffset) {
+      return {
+        endOffset,
+        lastTotal,
+        tokenUsageBaselines,
+        lastModel,
+        lastServiceTier: typeof lastServiceTier === "string" ? lastServiceTier : null,
+        modelAttributionState: previousModelAttributionState,
+        usageRecordState: previousUsageRecordState,
+        eventsAggregated: 0,
+        projectFileContexts,
+      };
+    }
     const snapshot = await readCodexRolloutSnapshot(filePath);
     if (!snapshot) {
       // Soft sync skips a bad archive and keeps the prior cursor so later

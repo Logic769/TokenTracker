@@ -1202,7 +1202,13 @@ async function parseCodexRolloutFile(filePath, {
       compactionResponseIds: Array.from(compactionResponseIds),
     };
     result.endOffset = readProgress.endOffset;
-    result.appendable = Boolean(contentHasher) && (
+    // Compressed snapshots are not append-only logs: endOffset stays at the
+    // pre-decode cursor (often 0) and must never be marked appendable, or the
+    // next growth would "resume" by parsing compressed bytes as JSONL.
+    const hasCompressedArchive = filePaths.some(
+      (candidate) => typeof candidate === "string" && /\.jsonl\.zstd?$/i.test(candidate),
+    );
+    result.appendable = Boolean(contentHasher) && !hasCompressedArchive && (
       readProgress.endOffset === 0 || readProgress.lastByte === 0x0a
     );
     result.contentHashState = contentHasher;

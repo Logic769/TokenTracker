@@ -771,6 +771,50 @@ test("compressed Codex archive growth does not inflate totals (issue #817)", asy
   }
 });
 
+test("unchanged compressed archive with publicRepoResolver does not inflate (issue #817)", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-817-resolver-"));
+  try {
+    const uuid = "019c26ca-e6bb-7e00-b33a-2ac67a11ddb9";
+    const archiveDir = path.join(tmp, "archived_sessions");
+    await fs.mkdir(archiveDir, { recursive: true });
+    const usage = { input_tokens: 100, cached_input_tokens: 0, output_tokens: 0, reasoning_output_tokens: 0, total_tokens: 100 };
+    const usage2 = { input_tokens: 200, cached_input_tokens: 0, output_tokens: 0, reasoning_output_tokens: 0, total_tokens: 200 };
+    const textBody = [
+      JSON.stringify({ timestamp: "2026-06-09T10:00:00.000Z", type: "session_meta", payload: { id: uuid, cwd: "/tmp/proj" } }),
+      buildTokenCountLine({ ts: "2026-06-09T10:01:00.000Z", last: usage, total: usage }),
+      buildTokenCountLine({
+        ts: "2026-06-09T10:02:00.000Z",
+        last: {
+          input_tokens: 100, cached_input_tokens: 0, output_tokens: 0,
+          reasoning_output_tokens: 0, total_tokens: 100,
+        },
+        total: usage2,
+      }),
+    ].join("\n") + "\n";
+    const rolloutPath = path.join(archiveDir, `rollout-2026-06-09T10-00-00-${uuid}.jsonl.zst`);
+    await fs.writeFile(rolloutPath, await compressZstdForTest(Buffer.from(textBody, "utf8")));
+
+    const cursors = { version: 1, files: {}, updatedAt: null };
+    const queuePath = path.join(tmp, "queue.jsonl");
+    const projectQueuePath = path.join(tmp, "project.queue.jsonl");
+    const resolver = async () => ({ owner: "acme", name: "proj", host: "github.com" });
+
+    await parseRolloutIncremental({
+      rolloutFiles: [rolloutPath], cursors, queuePath, projectQueuePath, source: "codex",
+      publicRepoResolver: resolver,
+    });
+    const before = cursors.files[rolloutPath].lastTotal.total_tokens;
+    await parseRolloutIncremental({
+      rolloutFiles: [rolloutPath], cursors, queuePath, projectQueuePath, source: "codex",
+      publicRepoResolver: resolver,
+    });
+    assert.equal(cursors.files[rolloutPath].lastTotal.total_tokens, before);
+    assert.equal(before, 200);
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
 test("parseRolloutIncremental does not double-count a session moved sessions/ -> archived_sessions/ (issue #187)", async () => {
   // When Codex-Manager archives a session, the same rollout file (same session
   // UUID + event timestamps) reappears at a different path. Now that sync scans
