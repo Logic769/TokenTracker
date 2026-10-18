@@ -614,6 +614,96 @@ test("malformed compressed Codex archive does not abort the sync (issue #817)", 
   }
 });
 
+test("malformed compressed Codex archive throws under strict rebuild policy (issue #817)", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-817-strict-"));
+  try {
+    const uuid = "019c26ca-e6bb-7e00-b33a-2ac67a11ddb9";
+    const archiveDir = path.join(tmp, "archived_sessions");
+    await fs.mkdir(archiveDir, { recursive: true });
+    const badPath = path.join(archiveDir, `rollout-2026-06-09T10-00-00-${uuid}.jsonl.zst`);
+    await fs.writeFile(badPath, Buffer.from([0x28, 0xb5, 0x2f, 0xfd, 0x00]));
+    await assert.rejects(
+      () => parseRolloutIncremental({
+        rolloutFiles: [badPath],
+        cursors: { version: 1, files: {}, updatedAt: null },
+        queuePath: path.join(tmp, "queue.jsonl"),
+        source: "codex",
+        invalidRecordPolicy: "throw",
+      }),
+      /unreadable Codex compressed archive/,
+    );
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("compressed Codex project-only rescan keeps compressed-size cursor (issue #817)", async () => {
+  // After a full sync, an expired project context must re-read cwd via the
+  // snapshot decoder — never as raw compressed bytes — and leave the cursor
+  // pinned to the compressed size so the next unchanged check still hits.
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-817-proj-"));
+  try {
+    const repoRoot = path.join(tmp, "repo");
+    await fs.mkdir(path.join(repoRoot, ".git"), { recursive: true });
+    await fs.writeFile(
+      path.join(repoRoot, ".git", "config"),
+      `[remote "origin"]\n\turl = https://github.com/acme/alpha.git\n`,
+      "utf8",
+    );
+    const uuid = "019c26ca-e6bb-7e00-b33a-2ac67a11ddb9";
+    const usage = {
+      input_tokens: 2,
+      cached_input_tokens: 0,
+      output_tokens: 3,
+      reasoning_output_tokens: 0,
+      total_tokens: 5,
+    };
+    const text = [
+      JSON.stringify({
+        timestamp: "2026-01-26T00:00:00.000Z",
+        type: "session_meta",
+        payload: { id: uuid, cwd: repoRoot },
+      }),
+      buildTokenCountLine({ ts: "2026-01-26T00:10:00.000Z", last: usage, total: usage }),
+    ].join("\n") + "\n";
+    const compressed = await compressZstdForTest(Buffer.from(text, "utf8"));
+    const archiveDir = path.join(tmp, "archived_sessions");
+    await fs.mkdir(archiveDir, { recursive: true });
+    const rolloutPath = path.join(archiveDir, `rollout-2026-01-26T00-00-00-${uuid}.jsonl.zst`);
+    await fs.writeFile(rolloutPath, compressed);
+
+    const queuePath = path.join(tmp, "queue.jsonl");
+    const projectQueuePath = path.join(tmp, "project.queue.jsonl");
+    const cursors = { version: 1, files: {}, updatedAt: null };
+    const first = await parseRolloutIncremental({
+      rolloutFiles: [rolloutPath],
+      cursors,
+      queuePath,
+      projectQueuePath,
+      source: "codex",
+    });
+    assert.equal(first.eventsAggregated, 1);
+    const compressedSize = compressed.length;
+    assert.equal(cursors.files[rolloutPath].offset, compressedSize);
+    assert.equal(cursors.files[rolloutPath].projectOffset, compressedSize);
+
+    await fs.writeFile(path.join(repoRoot, ".git", "config"), "", "utf8");
+    const second = await parseRolloutIncremental({
+      rolloutFiles: [rolloutPath],
+      cursors,
+      queuePath,
+      projectQueuePath,
+      source: "codex",
+    });
+    assert.equal(second.eventsAggregated, 0);
+    assert.equal(cursors.files[rolloutPath].offset, compressedSize,
+      "project-only rescan must not rewrite cursor to a decompressed newline offset");
+    assert.equal(cursors.files[rolloutPath].projectOffset, compressedSize);
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
 test("parseRolloutIncremental does not double-count a session moved sessions/ -> archived_sessions/ (issue #187)", async () => {
   // When Codex-Manager archives a session, the same rollout file (same session
   // UUID + event timestamps) reappears at a different path. Now that sync scans

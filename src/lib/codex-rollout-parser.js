@@ -53,7 +53,13 @@ async function readCodexRolloutText(filePath, { maxOutputBytes = CODEX_ROLLOUT_T
   // rollout graph at import time.
   const rollout = require("./rollout");
   const snapshot = await rollout.readCodexRolloutSnapshot(filePath, { maxOutputBytes });
-  if (!snapshot) throw new Error(`missing Codex archive ${filePath}`);
+  if (!snapshot) {
+    // Treat undecodable / vanished archives as recoverable I/O so grouped
+    // session reads (live + archive) can still use a readable sibling copy.
+    const error = new Error(`unreadable Codex archive ${filePath}`);
+    error.code = "EIO";
+    throw error;
+  }
   // Snapshot lines keep their "\n" terminators; the tail element may be an
   // unterminated final line — join preserves exactly that.
   return snapshot.lines.join("\n");

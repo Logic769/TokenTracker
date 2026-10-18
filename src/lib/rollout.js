@@ -2351,6 +2351,14 @@ async function parseRolloutFile({
   if (isCompressedRolloutPath(filePath)) {
     const snapshot = await readCodexRolloutSnapshot(filePath);
     if (!snapshot) {
+      // Soft sync skips a bad archive and keeps the prior cursor so later
+      // files still count. Strict rebuilds (invalidRecordPolicy=throw), used
+      // by repairCodexRescanInflation, must fail closed: a silent skip here
+      // would let another readable session satisfy the non-empty-bucket
+      // safeguard and permanently delete this archive's prior usage.
+      if (invalidRecordPolicy === "throw") {
+        throw new Error(`unreadable Codex compressed archive: ${filePath}`);
+      }
       return {
         endOffset: startOffset,
         lastTotal,
@@ -2877,6 +2885,79 @@ async function scanRolloutProjectFileContexts({
   if (!projectState || endOffset <= 0) {
     return {
       endOffset,
+      lastTotal,
+      tokenUsageBaselines,
+      lastModel,
+      lastServiceTier: lastServiceTier || null,
+      modelAttributionState,
+      eventsAggregated: 0,
+      projectFileContexts,
+    };
+  }
+
+  // Compressed archives cannot be scanned as byte streams: JSONL newlines in
+  // the compressed payload are not record boundaries. Decode the snapshot,
+  // then walk decompressed lines for cwd changes. Pin the cursor to the
+  // compressed size so the next sync's unchanged check keeps working.
+  if (isCompressedRolloutPath(filePath)) {
+    const snapshot = await readCodexRolloutSnapshot(filePath);
+    if (!snapshot) {
+      if (invalidRecordPolicy === "throw") {
+        throw new Error(`unreadable Codex compressed archive: ${filePath}`);
+      }
+      return {
+        endOffset,
+        lastTotal,
+        tokenUsageBaselines,
+        lastModel,
+        lastServiceTier: lastServiceTier || null,
+        modelAttributionState,
+        eventsAggregated: 0,
+        projectFileContexts,
+      };
+    }
+    let currentCwd = null;
+    for (const raw of snapshot.lines) {
+      const line = typeof raw === "string" ? raw : "";
+      if (
+        !line ||
+        !(
+          line.includes('"turn_context"') ||
+          line.includes('"session_meta"')
+        ) ||
+        !line.includes('"cwd"')
+      ) {
+        continue;
+      }
+      let obj;
+      try {
+        obj = JSON.parse(line);
+      } catch (error) {
+        if (invalidRecordPolicy === "throw") throw error;
+        continue;
+      }
+      if (
+        (obj?.type !== "turn_context" && obj?.type !== "session_meta") ||
+        !obj?.payload ||
+        typeof obj.payload !== "object" ||
+        typeof obj.payload.cwd !== "string"
+      ) {
+        continue;
+      }
+      const nextCwd = obj.payload.cwd.trim();
+      if (!nextCwd || nextCwd === currentCwd) continue;
+      const context = await resolveProjectContextForPath({
+        startDir: wsl.mapWslCwdToUnc(nextCwd, filePath),
+        projectMetaCache,
+        publicRepoCache,
+        publicRepoResolver,
+        projectState,
+      });
+      currentCwd = nextCwd;
+      addProjectFileContext(projectFileContexts, context);
+    }
+    return {
+      endOffset: snapshot.size,
       lastTotal,
       tokenUsageBaselines,
       lastModel,
