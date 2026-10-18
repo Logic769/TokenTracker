@@ -704,6 +704,73 @@ test("compressed Codex project-only rescan keeps compressed-size cursor (issue #
   }
 });
 
+test("compressed Codex archive growth does not inflate totals (issue #817)", async () => {
+  // Same inode, larger compressed bytes: must full-rescan without retaining
+  // lastTotal, or previously counted events are applied again.
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-817-grow-"));
+  try {
+    const uuid = "019c26ca-e6bb-7e00-b33a-2ac67a11ddb9";
+    const archiveDir = path.join(tmp, "archived_sessions");
+    await fs.mkdir(archiveDir, { recursive: true });
+    const rolloutPath = path.join(archiveDir, `rollout-2026-06-09T10-00-00-${uuid}.jsonl.zst`);
+
+    function linesFor(totals) {
+      return totals.map((total, index) => {
+        const ts = `2026-06-09T10:0${index}:00.000Z`;
+        const last = index === 0
+          ? total
+          : {
+              input_tokens: total.input_tokens - totals[index - 1].input_tokens,
+              cached_input_tokens: 0,
+              output_tokens: total.output_tokens - totals[index - 1].output_tokens,
+              reasoning_output_tokens: 0,
+              total_tokens: total.total_tokens - totals[index - 1].total_tokens,
+            };
+        return [
+          index === 0
+            ? JSON.stringify({ timestamp: ts, type: "session_meta", payload: { id: uuid, cwd: "/tmp/proj" } })
+            : null,
+          buildTokenCountLine({ ts, last, total }),
+        ].filter(Boolean).join("\n");
+      }).join("\n") + "\n";
+    }
+
+    const firstTotals = [
+      { input_tokens: 100, cached_input_tokens: 0, output_tokens: 0, reasoning_output_tokens: 0, total_tokens: 100 },
+      { input_tokens: 200, cached_input_tokens: 0, output_tokens: 0, reasoning_output_tokens: 0, total_tokens: 200 },
+    ];
+    await fs.writeFile(rolloutPath, await compressZstdForTest(Buffer.from(linesFor(firstTotals), "utf8")));
+
+    const cursors = { version: 1, files: {}, updatedAt: null };
+    const queuePath = path.join(tmp, "queue.jsonl");
+    const first = await parseRolloutIncremental({
+      rolloutFiles: [rolloutPath], cursors, queuePath, source: "codex",
+    });
+    assert.equal(first.eventsAggregated, 2);
+
+    const grownTotals = [
+      ...firstTotals,
+      { input_tokens: 350, cached_input_tokens: 0, output_tokens: 0, reasoning_output_tokens: 0, total_tokens: 350 },
+    ];
+    // Rewrite in place (same path); inode may or may not change on this FS —
+    // force same-inode semantics by restoring the cursor inode after write.
+    const prevInode = cursors.files[rolloutPath].inode;
+    await fs.writeFile(rolloutPath, await compressZstdForTest(Buffer.from(linesFor(grownTotals), "utf8")));
+    cursors.files[rolloutPath].inode = prevInode;
+
+    const second = await parseRolloutIncremental({
+      rolloutFiles: [rolloutPath], cursors, queuePath, source: "codex",
+    });
+    assert.equal(second.eventsAggregated, 1, "only the new event should aggregate");
+
+    const queued = (await fs.readFile(queuePath, "utf8")).trim().split("\n").filter(Boolean).map(JSON.parse);
+    const latest = queued[queued.length - 1];
+    assert.equal(latest.total_tokens, 350, "lifetime total must be 350 not 450");
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
 test("parseRolloutIncremental does not double-count a session moved sessions/ -> archived_sessions/ (issue #187)", async () => {
   // When Codex-Manager archives a session, the same rollout file (same session
   // UUID + event timestamps) reappears at a different path. Now that sync scans

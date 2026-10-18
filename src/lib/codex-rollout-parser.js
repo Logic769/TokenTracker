@@ -1379,8 +1379,15 @@ function isRecoverableGroupedReadError(error) {
 
 async function* iterateCodexObjects(filePaths, diagnostics, options = {}) {
   if (filePaths.length <= 1) {
-    for await (const record of readCodexObjects(filePaths[0], diagnostics, 0, options)) {
-      yield record.obj;
+    // Same recoverable policy as multi-file groups: a lone undecodable
+    // archive must not fail the entire context-breakdown request.
+    if (!filePaths[0]) return;
+    try {
+      for await (const record of readCodexObjects(filePaths[0], diagnostics, 0, options)) {
+        yield record.obj;
+      }
+    } catch (error) {
+      if (!isRecoverableGroupedReadError(error)) throw error;
     }
     return;
   }

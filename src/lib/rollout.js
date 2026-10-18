@@ -228,7 +228,16 @@ async function readCodexRolloutSnapshot(filePath, { maxOutputBytes = CODEX_ROLLO
       // the sync: return null so the caller keeps the prior cursor and retries.
       return null;
     }
-    const text = decoded.toString("utf8");
+    // Fatal UTF-8: uncompressed JSONL parsing rejects invalid bytes under
+    // invalidRecordPolicy=throw. toString("utf8") would silently replace them
+    // and claim utf8Valid, so a corrupted discriminator could drop usage
+    // during repairCodexRescanInflation. Fail the snapshot instead.
+    let text;
+    try {
+      text = new TextDecoder("utf-8", { fatal: true }).decode(decoded);
+    } catch (_error) {
+      return null;
+    }
     return { ...metadata, unchanged: false, lines: text.length > 0 ? text.split("\n") : [] };
   } finally {
     await handle.close().catch(() => {});
@@ -550,24 +559,42 @@ async function parseRolloutIncremental({
       prevOffset < st.size &&
       (!prev.lastTotal || typeof prev.lastTotal !== "object")
     );
-    const startOffset = sameInode && !truncated && !rebuildingCodexBaseline ? prevOffset : 0;
-    const lastTotal = sameInode && !truncated && !rebuildingCodexBaseline
+    let startOffset = sameInode && !truncated && !rebuildingCodexBaseline ? prevOffset : 0;
+    let lastTotal = sameInode && !truncated && !rebuildingCodexBaseline
       ? prev.lastTotal || null
       : null;
-    const tokenUsageBaselines = sameInode && !truncated && !rebuildingCodexBaseline
+    let tokenUsageBaselines = sameInode && !truncated && !rebuildingCodexBaseline
       ? prev.tokenUsageBaselines || null
       : null;
-    const lastModel = sameInode && !truncated ? prev.lastModel || null : null;
-    const lastServiceTier = sameInode && !truncated ? prev.lastServiceTier || null : null;
-    const modelAttributionState = sameInode && !truncated
+    let lastModel = sameInode && !truncated ? prev.lastModel || null : null;
+    let lastServiceTier = sameInode && !truncated ? prev.lastServiceTier || null : null;
+    let modelAttributionState = sameInode && !truncated
       ? prev.modelAttributionState || null
       : null;
     // Only valid for the bytes before the resume offset; a rescan from 0
     // rebuilds it. A cursor from before #652 with a lastTotal has seen a
     // token_count already.
-    const usageRecordState = startOffset > 0
+    let usageRecordState = startOffset > 0
       ? prev?.codexUsageRecord || (prev?.lastTotal ? { sawTokenCount: true } : null)
       : null;
+
+    // Compressed archives are whole-file snapshots. If the compressed bytes
+    // changed under the same inode, re-reading with retained lastTotal and
+    // append-only dedup double-counts prior events. Force a full rescan.
+    const compressedSnapshotRescan = isCompressedRolloutPath(filePath)
+      && sameInode
+      && !truncated
+      && prevOffset > 0
+      && prevOffset !== st.size;
+    if (compressedSnapshotRescan) {
+      startOffset = 0;
+      lastTotal = null;
+      tokenUsageBaselines = null;
+      lastModel = null;
+      lastServiceTier = null;
+      modelAttributionState = null;
+      usageRecordState = null;
+    }
 
     const codexProjectFastPath =
       projectEnabled && (fileSource === DEFAULT_SOURCE || fileSource === "acode");
@@ -627,7 +654,8 @@ async function parseRolloutIncremental({
         ? getAcodeEventDedup()
         : null;
     const codexEventTracker = rolloutEventDedup
-      ? (needsHistoricalRolloutDedup({
+      ? (compressedSnapshotRescan
+          || needsHistoricalRolloutDedup({
           filePath,
           prev,
           sameInode,
