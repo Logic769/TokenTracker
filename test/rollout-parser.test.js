@@ -79,6 +79,7 @@ const {
   resolveZedDbPath,
   resolveGooseDbPath,
   listRolloutFilesDeep,
+  readCodexRolloutSnapshot,
   filterColdCodexRolloutFiles,
   bucketKey,
 } = require("../src/lib/rollout");
@@ -515,12 +516,20 @@ test("listRolloutFilesDeep finds flat archived_sessions files the strict scanner
   }
 });
 
+async function compressZstdForTest(buf) {
+  // Node >=22.15 has zlib.zstdCompressSync; Node 20 (engines.node) falls back
+  // to @mongodb-js/zstd, matching production decodeDshZstd.
+  const zlib = require("node:zlib");
+  if (typeof zlib.zstdCompressSync === "function") return zlib.zstdCompressSync(buf);
+  const { compress } = require("@mongodb-js/zstd");
+  return Buffer.from(await compress(buf));
+}
+
 test("compressed Codex archives are discovered and counted once (issue #817)", async () => {
   // Newer Codex compresses older sessions to rollout-*.jsonl.zst, both under
   // sessions/** and flat in archived_sessions/. The scanner must discover
   // them, decode via the shared DSH zstd machinery, and dedup by
   // sessionUUID:timestamp so a re-sync is a no-op.
-  const zlib = require("node:zlib");
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-817-"));
   try {
     const uuid = "019c26ca-e6bb-7e00-b33a-2ac67a11ddb9";
@@ -530,7 +539,7 @@ test("compressed Codex archives are discovered and counted once (issue #817)", a
       buildTokenCountLine({ ts: "2026-06-09T10:01:00.000Z", last: usage, total: usage }),
     ];
     const text = lines.join("\n") + "\n";
-    const compressed = zlib.zstdCompressSync(Buffer.from(text, "utf8"));
+    const compressed = await compressZstdForTest(Buffer.from(text, "utf8"));
 
     const archiveDir = path.join(tmp, "archived_sessions");
     await fs.mkdir(archiveDir, { recursive: true });
@@ -553,8 +562,8 @@ test("compressed Codex archives are discovered and counted once (issue #817)", a
     // Multi-frame archives (concatenated zstd frames) must decode fully.
     const multiPath = path.join(archiveDir, `rollout-2026-06-10T10-00-00-${uuid}.jsonl.zst`);
     await fs.writeFile(multiPath, Buffer.concat([
-      zlib.zstdCompressSync(Buffer.from(text.slice(0, 40), "utf8")),
-      zlib.zstdCompressSync(Buffer.from(text.slice(40), "utf8")),
+      await compressZstdForTest(Buffer.from(text.slice(0, 40), "utf8")),
+      await compressZstdForTest(Buffer.from(text.slice(40), "utf8")),
     ]));
     const foundMulti = await listRolloutFilesDeep(archiveDir);
     assert.ok(foundMulti.includes(multiPath), "multi-frame archive must be discovered");
@@ -563,6 +572,43 @@ test("compressed Codex archives are discovered and counted once (issue #817)", a
       rolloutFiles: [multiPath], cursors: cursors2, queuePath: path.join(tmp, "queue2.jsonl"), source: "codex",
     });
     assert.equal(multi.eventsAggregated, 1, "multi-frame archive must decode all events");
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("malformed compressed Codex archive does not abort the sync (issue #817)", async () => {
+  // A truncated .zst must return null from the snapshot reader so the sync
+  // loop keeps the prior cursor and continues with later rollout files.
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-817-bad-"));
+  try {
+    const uuid = "019c26ca-e6bb-7e00-b33a-2ac67a11ddb9";
+    const archiveDir = path.join(tmp, "archived_sessions");
+    await fs.mkdir(archiveDir, { recursive: true });
+    const badPath = path.join(archiveDir, `rollout-2026-06-09T10-00-00-${uuid}.jsonl.zst`);
+    await fs.writeFile(badPath, Buffer.from([0x28, 0xb5, 0x2f, 0xfd, 0x00])); // truncated zstd magic+frame
+
+    const usage = { input_tokens: 10, cached_input_tokens: 0, output_tokens: 5, reasoning_output_tokens: 0, total_tokens: 15 };
+    const goodPath = path.join(archiveDir, `rollout-2026-06-09T11-00-00-${uuid}.jsonl`);
+    await fs.writeFile(
+      goodPath,
+      [
+        JSON.stringify({ timestamp: "2026-06-09T11:00:00.000Z", type: "session_meta", payload: { id: uuid, cwd: "/tmp/proj" } }),
+        buildTokenCountLine({ ts: "2026-06-09T11:01:00.000Z", last: usage, total: usage }),
+      ].join("\n") + "\n",
+      "utf8",
+    );
+
+    assert.equal(await readCodexRolloutSnapshot(badPath), null, "malformed archive must yield null");
+
+    const cursors = { version: 1, files: {}, updatedAt: null };
+    const result = await parseRolloutIncremental({
+      rolloutFiles: [badPath, goodPath],
+      cursors,
+      queuePath: path.join(tmp, "queue.jsonl"),
+      source: "codex",
+    });
+    assert.equal(result.eventsAggregated, 1, "sibling jsonl must still be parsed after a bad archive");
   } finally {
     await fs.rm(tmp, { recursive: true, force: true });
   }

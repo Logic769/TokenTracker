@@ -219,8 +219,15 @@ async function readCodexRolloutSnapshot(filePath, { maxOutputBytes = CODEX_ROLLO
       inode: initialStat.ino || 0,
     };
     if (data.length === 0) return { ...metadata, unchanged: false, lines: [] };
-    const inspected = inspectDshZstdFrames(data, outputLimit);
-    const decoded = await decodeDshZstd(data, { maxOutputBytes: outputLimit, inspected });
+    let decoded;
+    try {
+      const inspected = inspectDshZstdFrames(data, outputLimit);
+      decoded = await decodeDshZstd(data, { maxOutputBytes: outputLimit, inspected });
+    } catch (_error) {
+      // Malformed / truncated / oversized archives must not abort the rest of
+      // the sync: return null so the caller keeps the prior cursor and retries.
+      return null;
+    }
     const text = decoded.toString("utf8");
     return { ...metadata, unchanged: false, lines: text.length > 0 ? text.split("\n") : [] };
   } finally {
