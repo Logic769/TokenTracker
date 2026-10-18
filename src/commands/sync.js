@@ -6287,8 +6287,12 @@ async function scanCodexUsageLineages(filePath, maxBytes = Infinity) {
     let affected = false;
     const isCompressed = typeof filePath === "string" && /\.jsonl\.zstd?$/i.test(filePath);
     if (isCompressed) {
-      // Archives are whole-file snapshots; byte limits on compressed size are
-      // not meaningful for lineage detection. Decode once, then scan lines.
+      // Honor the background-sync lineage budget against compressed size so a
+      // pending repair with large archives stays bounded and returns
+      // indeterminate until a full sync can finish the scan.
+      if (!(byteLimit > 0) || before.size > byteLimit) {
+        return { affected: false, indeterminate: true };
+      }
       const snapshot = await readCodexRolloutSnapshot(filePath);
       if (!snapshot) return { affected: false, indeterminate: true };
       for (const raw of snapshot.lines) {
