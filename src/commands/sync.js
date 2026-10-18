@@ -26,6 +26,7 @@ const { countRecordOnlyFiles, formatRecordOnlyWarning } = require("../lib/codex-
 const {
   listRolloutFiles,
   listRolloutFilesDeep,
+  readCodexRolloutSnapshot,
   codexSessionIdFromPath,
   filterColdCodexRolloutFiles,
   listClaudeProjectFiles,
@@ -6284,26 +6285,52 @@ async function scanCodexUsageLineages(filePath, maxBytes = Infinity) {
     const byteLimit = Number.isFinite(maxBytes) ? Math.max(0, maxBytes) : Infinity;
     let bytesRead = 0;
     let affected = false;
-    stream = fssync.createReadStream(filePath, { highWaterMark: 32 * 1024 });
-    for await (const record of physicalJsonlRecords(stream, {
-      maxPhysicalBytes: byteLimit,
-    })) {
-      const { line } = record;
-      bytesRead += record.physicalBytes;
-      if (bytesRead > byteLimit) return { affected: false, indeterminate: true };
-      if (!line.trim()) continue;
-      let obj;
-      try {
-        obj = JSON.parse(line);
-      } catch (_e) {
-        return { affected: false, indeterminate: true };
+    const isCompressed = typeof filePath === "string" && /\.jsonl\.zstd?$/i.test(filePath);
+    if (isCompressed) {
+      // Archives are whole-file snapshots; byte limits on compressed size are
+      // not meaningful for lineage detection. Decode once, then scan lines.
+      const snapshot = await readCodexRolloutSnapshot(filePath);
+      if (!snapshot) return { affected: false, indeterminate: true };
+      for (const raw of snapshot.lines) {
+        const line = typeof raw === "string" ? raw : "";
+        if (!line.trim()) continue;
+        let obj;
+        try {
+          obj = JSON.parse(line);
+        } catch (_e) {
+          return { affected: false, indeterminate: true };
+        }
+        const token = extractTokenCount(obj);
+        const info = token?.info;
+        if (!info || typeof info !== "object") continue;
+        consumeUsageDelta(state, info.last_token_usage, info.total_token_usage);
+        if (state.sawInterleaved || state.sawDivergentCumulative) {
+          affected = true;
+        }
       }
-      const token = extractTokenCount(obj);
-      const info = token?.info;
-      if (!info || typeof info !== "object") continue;
-      consumeUsageDelta(state, info.last_token_usage, info.total_token_usage);
-      if (state.sawInterleaved || state.sawDivergentCumulative) {
-        affected = true;
+      bytesRead = snapshot.size;
+    } else {
+      stream = fssync.createReadStream(filePath, { highWaterMark: 32 * 1024 });
+      for await (const record of physicalJsonlRecords(stream, {
+        maxPhysicalBytes: byteLimit,
+      })) {
+        const { line } = record;
+        bytesRead += record.physicalBytes;
+        if (bytesRead > byteLimit) return { affected: false, indeterminate: true };
+        if (!line.trim()) continue;
+        let obj;
+        try {
+          obj = JSON.parse(line);
+        } catch (_e) {
+          return { affected: false, indeterminate: true };
+        }
+        const token = extractTokenCount(obj);
+        const info = token?.info;
+        if (!info || typeof info !== "object") continue;
+        consumeUsageDelta(state, info.last_token_usage, info.total_token_usage);
+        if (state.sawInterleaved || state.sawDivergentCumulative) {
+          affected = true;
+        }
       }
     }
     const after = await readCodexFileSnapshot(filePath);
@@ -6408,6 +6435,23 @@ async function scanForForkedCodexRollout(rolloutFiles) {
     if (!fp || src !== "codex") continue;
     let fh = null;
     try {
+      if (typeof fp === "string" && /\.jsonl\.zstd?$/i.test(fp)) {
+        const snapshot = await readCodexRolloutSnapshot(fp);
+        if (!snapshot) {
+          indeterminate = true;
+          continue;
+        }
+        // Fork marker is in early session_meta; scan a bounded prefix of lines.
+        let head = "";
+        for (const raw of snapshot.lines) {
+          head += (typeof raw === "string" ? raw : "") + "\n";
+          if (head.length >= HEAD_BYTES) break;
+        }
+        if (head.includes('"forked_from_id"')) {
+          return { forked: true, indeterminate: false };
+        }
+        continue;
+      }
       fh = await fs.open(fp, "r");
       const buf = Buffer.alloc(HEAD_BYTES);
       const { bytesRead } = await fh.read(buf, 0, HEAD_BYTES, 0);

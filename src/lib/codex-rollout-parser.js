@@ -1410,7 +1410,11 @@ async function* iterateCodexObjects(filePaths, diagnostics, options = {}) {
       if (!isRecoverableGroupedReadError(error)) throw error;
     }
   }
-  if (!scannedFiles) throw new Error("all grouped Codex rollout files failed during read");
+  if (!scannedFiles) {
+    const error = new Error("all grouped Codex rollout files failed during read");
+    error.code = "EIO";
+    throw error;
+  }
   records.sort((a, b) => {
     const aTimestamp = typeof a.obj?.timestamp === "string" ? a.obj.timestamp : "";
     const bTimestamp = typeof b.obj?.timestamp === "string" ? b.obj.timestamp : "";
