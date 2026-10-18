@@ -215,7 +215,14 @@ async function readCodexRolloutSnapshot(filePath, { maxOutputBytes = CODEX_ROLLO
     const outputLimit = Number.isSafeInteger(maxOutputBytes) && maxOutputBytes >= 0
       ? maxOutputBytes
       : CODEX_ROLLOUT_TEXT_MAX_BYTES;
-    const data = await handle.readFile();
+    let data;
+    try {
+      data = await handle.readFile();
+    } catch (_error) {
+      // Transient mount/IO failures (e.g. WSL ESTALE) must not abort the rest
+      // of sync; treat like a missing archive and keep the prior cursor.
+      return null;
+    }
     const metadata = {
       size: data.length,
       mtimeMs: Number.isFinite(initialStat.mtimeMs) ? initialStat.mtimeMs : 0,
