@@ -96,10 +96,13 @@ async function listRolloutFiles(sessionsDir, options = {}) {
       : null;
   const stats = options?.stats && typeof options.stats === "object" ? options.stats : null;
   if (dayInventoryCache) {
-    if (dayInventoryCache.version !== 1) {
+    // v2: isRolloutFileName also accepts rollout-*.jsonl.zst/.zstd. Old v1
+    // day lists omit archives that were already on disk when the directory
+    // metadata last matched, so bump to force a one-time rescan.
+    if (dayInventoryCache.version !== 2) {
       dayInventoryCache.days = {};
     }
-    dayInventoryCache.version = 1;
+    dayInventoryCache.version = 2;
     if (!dayInventoryCache.days || typeof dayInventoryCache.days !== "object") {
       dayInventoryCache.days = {};
     }
@@ -559,42 +562,34 @@ async function parseRolloutIncremental({
       prevOffset < st.size &&
       (!prev.lastTotal || typeof prev.lastTotal !== "object")
     );
-    let startOffset = sameInode && !truncated && !rebuildingCodexBaseline ? prevOffset : 0;
-    let lastTotal = sameInode && !truncated && !rebuildingCodexBaseline
+    const startOffset = sameInode && !truncated && !rebuildingCodexBaseline ? prevOffset : 0;
+    const lastTotal = sameInode && !truncated && !rebuildingCodexBaseline
       ? prev.lastTotal || null
       : null;
-    let tokenUsageBaselines = sameInode && !truncated && !rebuildingCodexBaseline
+    const tokenUsageBaselines = sameInode && !truncated && !rebuildingCodexBaseline
       ? prev.tokenUsageBaselines || null
       : null;
-    let lastModel = sameInode && !truncated ? prev.lastModel || null : null;
-    let lastServiceTier = sameInode && !truncated ? prev.lastServiceTier || null : null;
-    let modelAttributionState = sameInode && !truncated
+    const lastModel = sameInode && !truncated ? prev.lastModel || null : null;
+    const lastServiceTier = sameInode && !truncated ? prev.lastServiceTier || null : null;
+    const modelAttributionState = sameInode && !truncated
       ? prev.modelAttributionState || null
       : null;
     // Only valid for the bytes before the resume offset; a rescan from 0
     // rebuilds it. A cursor from before #652 with a lastTotal has seen a
     // token_count already.
-    let usageRecordState = startOffset > 0
+    const usageRecordState = startOffset > 0
       ? prev?.codexUsageRecord || (prev?.lastTotal ? { sawTokenCount: true } : null)
       : null;
 
     // Compressed archives are whole-file snapshots. If the compressed bytes
-    // changed under the same inode, re-reading with retained lastTotal and
-    // append-only dedup double-counts prior events. Force a full rescan.
+    // changed under the same inode, force historical dedup; parseRolloutFile
+    // ignores retained baselines for the parse itself. Do NOT clear cursor
+    // fields here — a soft decode failure must leave the prior cursor intact.
     const compressedSnapshotRescan = isCompressedRolloutPath(filePath)
       && sameInode
       && !truncated
       && prevOffset > 0
       && prevOffset !== st.size;
-    if (compressedSnapshotRescan) {
-      startOffset = 0;
-      lastTotal = null;
-      tokenUsageBaselines = null;
-      lastModel = null;
-      lastServiceTier = null;
-      modelAttributionState = null;
-      usageRecordState = null;
-    }
 
     const codexProjectFastPath =
       projectEnabled && (fileSource === DEFAULT_SOURCE || fileSource === "acode");
@@ -2431,16 +2426,20 @@ async function parseRolloutFile({
         };
       }
     })();
+    // Size changed under the same inode: drop retained baselines for THIS
+    // parse only. Soft-fail above still returns the caller-supplied baselines
+    // so the prior cursor is preserved when decode fails.
+    const rescanBaselines = startOffset > 0 && startOffset < endOffset;
     const parsed = await parseRolloutRecords({
       records,
       startOffset: 0,
       endOffset: 0,
-      lastTotal,
-      tokenUsageBaselines,
-      lastModel,
-      lastServiceTier,
-      modelAttributionState: previousModelAttributionState,
-      usageRecordState: previousUsageRecordState,
+      lastTotal: rescanBaselines ? null : lastTotal,
+      tokenUsageBaselines: rescanBaselines ? null : tokenUsageBaselines,
+      lastModel: rescanBaselines ? null : lastModel,
+      lastServiceTier: rescanBaselines ? null : lastServiceTier,
+      modelAttributionState: rescanBaselines ? null : previousModelAttributionState,
+      usageRecordState: rescanBaselines ? null : previousUsageRecordState,
       compactionResponseIds,
       hourlyState,
       touchedBuckets,
