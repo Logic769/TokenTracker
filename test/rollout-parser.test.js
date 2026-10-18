@@ -601,7 +601,17 @@ test("malformed compressed Codex archive does not abort the sync (issue #817)", 
 
     assert.equal(await readCodexRolloutSnapshot(badPath), null, "malformed archive must yield null");
 
-    const cursors = { version: 1, files: {}, updatedAt: null };
+    const priorCursor = {
+      inode: 424242,
+      offset: 128,
+      lastTotal: { input: 10, output: 5, cacheRead: 0, cacheWrite: 0, reasoning: 0 },
+      tokenUsageBaselines: null,
+      lastModel: "gpt-5",
+      lastServiceTier: null,
+      modelAttributionState: null,
+      updatedAt: "2026-06-09T09:00:00.000Z",
+    };
+    const cursors = { version: 1, files: { [badPath]: priorCursor }, updatedAt: null };
     const result = await parseRolloutIncremental({
       rolloutFiles: [badPath, goodPath],
       cursors,
@@ -609,6 +619,11 @@ test("malformed compressed Codex archive does not abort the sync (issue #817)", 
       source: "codex",
     });
     assert.equal(result.eventsAggregated, 1, "sibling jsonl must still be parsed after a bad archive");
+    assert.deepEqual(
+      cursors.files[badPath],
+      priorCursor,
+      "soft-fail must leave the prior archive cursor untouched even when inode changed",
+    );
   } finally {
     await fs.rm(tmp, { recursive: true, force: true });
   }

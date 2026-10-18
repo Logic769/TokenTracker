@@ -711,6 +711,22 @@ async function parseRolloutIncremental({
           invalidRecordPolicy,
         });
 
+    if (result.snapshotUnavailable) {
+      // Leave cursors.files[key] untouched so the next readable snapshot is
+      // compared against the prior (inode, offset, baselines).
+      if (cb) {
+        cb({
+          index: idx + 1,
+          total: totalFiles,
+          filePath,
+          filesProcessed,
+          eventsAggregated,
+          bucketsQueued: touchedBuckets.size,
+        });
+      }
+      continue;
+    }
+
     const nextCursor = {
       inode,
       offset: result.endOffset,
@@ -2415,6 +2431,10 @@ async function parseRolloutFile({
         usageRecordState: previousUsageRecordState,
         eventsAggregated: 0,
         projectFileContexts,
+        // Tell the incremental caller not to rewrite cursors.files[key]. If the
+        // archive inode changed under a transient decode miss, overwriting the
+        // prior cursor would drop historical-dedup baselines and double-count.
+        snapshotUnavailable: true,
       };
     }
     // Decompressed lines have no meaningful compressed-byte offsets; the
@@ -2964,6 +2984,7 @@ async function scanRolloutProjectFileContexts({
         modelAttributionState,
         eventsAggregated: 0,
         projectFileContexts,
+        snapshotUnavailable: true,
       };
     }
     let currentCwd = null;
