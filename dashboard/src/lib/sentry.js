@@ -109,9 +109,18 @@ function resolveRelease() {
   return trimmed ? `tokentracker@${trimmed}` : undefined;
 }
 
+let initPromise = null;
+
+function browserDoNotTrackEnabled() {
+  if (typeof navigator === "undefined") return false;
+  if (navigator.doNotTrack === "1") return true;
+  if (navigator.globalPrivacyControl === true) return true;
+  return false;
+}
+
 async function startSentry(shell) {
   const dsn = resolveDsn();
-  if (!dsn) return;
+  if (!dsn) return { enabled: false, reason: "no-dsn" };
   const Sentry = await import("@sentry/react");
   Sentry.init({
     dsn,
@@ -136,36 +145,71 @@ async function startSentry(shell) {
       },
     },
   });
+  return { enabled: true };
+}
+
+async function resolveAndStart() {
+  if (typeof window === "undefined") return { enabled: false, reason: "no-window" };
+  if (import.meta.env.DEV || import.meta.env.MODE === "test") {
+    return { enabled: false, reason: "dev-or-test" };
+  }
+  if (!resolveDsn()) return { enabled: false, reason: "no-dsn" };
+
+  const shell = resolveSentryShell();
+  if (shell === "web") {
+    // Match PostHog: hosted web has no CLI telemetry pref, so honor browser DNT/GPC.
+    if (browserDoNotTrackEnabled()) return { enabled: false, reason: "dnt" };
+    return startSentry(shell);
+  }
+
+  try {
+    const res = await fetch("/functions/tokentracker-telemetry-pref");
+    const pref = res.ok ? await res.json() : null;
+    if (pref && pref.disabled === false) {
+      return startSentry(shell);
+    }
+    return { enabled: false, reason: "opt-out-or-unknown" };
+  } catch {
+    return { enabled: false, reason: "pref-unavailable" };
+  }
 }
 
 /**
  * Fire-and-forget Sentry init. Never throws into the app.
+ * Returns the shared init promise so callers can await readiness.
  */
 export function initSentry() {
-  if (typeof window === "undefined") return;
-  if (import.meta.env.DEV || import.meta.env.MODE === "test") return;
-  if (!resolveDsn()) return;
+  if (!initPromise) {
+    initPromise = resolveAndStart().catch(() => ({ enabled: false, reason: "init-failed" }));
+  }
+  return initPromise;
+}
 
+/**
+ * Capture after init settles so early route failures are not dropped while
+ * the telemetry-pref fetch is still in flight on localhost / native shells.
+ */
+export async function captureDashboardException(error, context) {
   try {
-    const shell = resolveSentryShell();
-    if (shell === "web") {
-      void startSentry(shell).catch(() => {
-        /* sentry must never break the app */
+    if (import.meta.env.DEV || import.meta.env.MODE === "test") return;
+    if (!resolveDsn()) return;
+    const result = await initSentry();
+    if (!result?.enabled) return;
+    const Sentry = await import("@sentry/react");
+    if (context?.tags || context?.extra) {
+      Sentry.withScope((scope) => {
+        if (context.tags) {
+          for (const [key, value] of Object.entries(context.tags)) {
+            scope.setTag(key, String(value));
+          }
+        }
+        if (context.extra) scope.setExtras(scrubValue(context.extra));
+        Sentry.captureException(error);
       });
       return;
     }
-    fetch("/functions/tokentracker-telemetry-pref")
-      .then((res) => (res.ok ? res.json() : null))
-      .then((pref) => {
-        if (pref && pref.disabled === false) {
-          return startSentry(shell);
-        }
-        return undefined;
-      })
-      .catch(() => {
-        /* preference unknown → sentry stays off */
-      });
+    Sentry.captureException(error);
   } catch {
-    /* sentry must never break the app */
+    /* never break the error page */
   }
 }

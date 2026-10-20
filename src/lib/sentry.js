@@ -164,13 +164,15 @@ async function initSentry({
       release: `tokentracker@${String(version || "").trim() || "0.0.0"}`,
       sendDefaultPii: false,
       tracesSampleRate: 0,
-      // Errors only: drop session + console integrations (console crumbs can
-      // embed local log excerpts).
+      // Errors only: drop process-session + console; replace Http so request
+      // sessions stay off (Http defaults sessions:true and bypasses beforeSend).
       integrations(defaults) {
-        return defaults.filter((integration) => {
+        const filtered = defaults.filter((integration) => {
           const name = integration?.name || "";
-          return name !== "ProcessSession" && name !== "Console";
+          return name !== "ProcessSession" && name !== "Console" && name !== "Http";
         });
+        filtered.push(Sentry.httpIntegration({ sessions: false }));
+        return filtered;
       },
       transportOptions: proxyResolved?.proxyUrl
         ? { proxy: proxyResolved.proxyUrl }
