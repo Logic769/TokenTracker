@@ -55,22 +55,30 @@ function scrubValue(value, depth = 0) {
   return value;
 }
 
+function truncateMaybe(value, max = 240) {
+  if (typeof value !== "string") return value;
+  if (value.length <= max) return value;
+  return `${value.slice(0, max)}…[truncated]`;
+}
+
 export function scrubEvent(event) {
   if (!event || typeof event !== "object") return event;
   const next = { ...event };
-  if (next.message) next.message = scrubString(next.message);
+  if (next.message) next.message = truncateMaybe(scrubString(next.message));
   if (next.extra) next.extra = scrubValue(next.extra);
   if (next.contexts) next.contexts = scrubValue(next.contexts);
   if (next.request) next.request = scrubValue(next.request);
   if (Array.isArray(next.breadcrumbs)) {
-    next.breadcrumbs = next.breadcrumbs.map((crumb) => scrubValue(crumb));
+    next.breadcrumbs = next.breadcrumbs
+      .filter((crumb) => crumb && crumb.category !== "console")
+      .map((crumb) => scrubValue(crumb));
   }
   if (next.exception?.values) {
     next.exception = {
       ...next.exception,
       values: next.exception.values.map((item) => ({
         ...item,
-        value: scrubString(item?.value),
+        value: truncateMaybe(scrubString(item?.value)),
       })),
     };
   }
@@ -111,7 +119,13 @@ async function startSentry(shell) {
     release: resolveRelease(),
     sendDefaultPii: false,
     tracesSampleRate: 0,
-    integrations: [],
+    // Filter defaults: empty array ADDS to defaults, it does not replace them.
+    integrations(defaults) {
+      return defaults.filter((integration) => {
+        const name = integration?.name || "";
+        return name !== "BrowserSession" && name !== "Console";
+      });
+    },
     beforeSend(event) {
       return scrubEvent(event);
     },

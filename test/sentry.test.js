@@ -91,3 +91,48 @@ test("initSentry respects telemetry opt-out when test marker cleared", async () 
   assert.equal(result.enabled, false);
   assert.equal(result.reason, "opt-out");
 });
+
+
+test("scrubEvent drops console breadcrumbs and truncates long values", () => {
+  const long = "x".repeat(400);
+  const scrubbed = scrubEvent({
+    message: long,
+    breadcrumbs: [
+      { category: "console", message: "JSON.parse unexpectedly found prompt text here" },
+      { category: "http", message: "GET /ok" },
+    ],
+    exception: { values: [{ value: long }] },
+  });
+  assert.ok(scrubbed.message.includes("…[truncated]"));
+  assert.equal(scrubbed.breadcrumbs.length, 1);
+  assert.equal(scrubbed.breadcrumbs[0].category, "http");
+  assert.ok(scrubbed.exception.values[0].value.includes("…[truncated]"));
+});
+
+test("initSentry skips when outbound proxy is blocked", async () => {
+  const env = { ...process.env };
+  delete env.NODE_TEST_CONTEXT;
+  env.TOKENTRACKER_SENTRY_DSN = "https://examplePublicKey@o0.ingest.sentry.io/0";
+  // Stub proxy helpers via require cache after loading module once is hard;
+  // instead verify the blocked reason path by monkeypatching the dependency.
+  const proxyEnvPath = require.resolve("../src/lib/proxy-env");
+  const original = require.cache[proxyEnvPath];
+  require.cache[proxyEnvPath] = {
+    id: proxyEnvPath,
+    filename: proxyEnvPath,
+    loaded: true,
+    exports: {
+      ...(original ? original.exports : {}),
+      readPersistedProxyConfig: () => ({ mode: "manual", protocol: "http", host: "", port: 0 }),
+      resolveEffectiveProxySource: () => ({ source: "blocked", proxyUrl: null, config: {} }),
+    },
+  };
+  _resetForTests();
+  // Re-require sentry so it picks up? It requires proxy-env inside init, so cache patch is enough.
+  const result = await initSentry({ env, trackerDir: null });
+  assert.equal(result.enabled, false);
+  assert.equal(result.reason, "proxy-blocked");
+  if (original) require.cache[proxyEnvPath] = original;
+  else delete require.cache[proxyEnvPath];
+  _resetForTests();
+});

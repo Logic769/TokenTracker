@@ -81,22 +81,32 @@ function scrubValue(value, depth = 0) {
   return value;
 }
 
+function truncateMaybe(value, max = 240) {
+  if (typeof value !== "string") return value;
+  if (value.length <= max) return value;
+  return `${value.slice(0, max)}…[truncated]`;
+}
+
 function scrubEvent(event) {
   if (!event || typeof event !== "object") return event;
   const next = { ...event };
-  if (next.message) next.message = scrubString(next.message);
+  if (next.message) next.message = truncateMaybe(scrubString(next.message));
   if (next.extra) next.extra = scrubValue(next.extra);
   if (next.contexts) next.contexts = scrubValue(next.contexts);
   if (next.request) next.request = scrubValue(next.request);
+  // Console breadcrumbs can carry parser / JSON.parse excerpts of local logs
+  // (prompt text). Drop them entirely; keep only non-console crumbs and scrub.
   if (Array.isArray(next.breadcrumbs)) {
-    next.breadcrumbs = next.breadcrumbs.map((crumb) => scrubValue(crumb));
+    next.breadcrumbs = next.breadcrumbs
+      .filter((crumb) => crumb && crumb.category !== "console")
+      .map((crumb) => scrubValue(crumb));
   }
   if (next.exception?.values) {
     next.exception = {
       ...next.exception,
       values: next.exception.values.map((item) => ({
         ...item,
-        value: scrubString(item?.value),
+        value: truncateMaybe(scrubString(item?.value)),
       })),
     };
   }
@@ -133,6 +143,18 @@ async function initSentry({
       return { enabled: false, reason: "opt-out" };
     }
 
+    // Honor the same outbound proxy / fail-closed policy as the rest of the CLI.
+    // Sentry's Node transport uses node:https (not undici), so pass proxy explicitly.
+    const {
+      readPersistedProxyConfig,
+      resolveEffectiveProxySource,
+    } = require("./proxy-env");
+    const proxyConfig = readPersistedProxyConfig();
+    const proxyResolved = resolveEffectiveProxySource({ env, proxyConfig });
+    if (proxyResolved?.source === "blocked") {
+      return { enabled: false, reason: "proxy-blocked" };
+    }
+
     // Lazy require keeps unit tests that never call init from paying the
     // module graph cost at import time of unrelated modules.
     const Sentry = require("@sentry/node");
@@ -142,6 +164,17 @@ async function initSentry({
       release: `tokentracker@${String(version || "").trim() || "0.0.0"}`,
       sendDefaultPii: false,
       tracesSampleRate: 0,
+      // Errors only: drop session + console integrations (console crumbs can
+      // embed local log excerpts).
+      integrations(defaults) {
+        return defaults.filter((integration) => {
+          const name = integration?.name || "";
+          return name !== "ProcessSession" && name !== "Console";
+        });
+      },
+      transportOptions: proxyResolved?.proxyUrl
+        ? { proxy: proxyResolved.proxyUrl }
+        : undefined,
       beforeSend(event) {
         return scrubEvent(event);
       },

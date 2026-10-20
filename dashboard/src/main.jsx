@@ -9,6 +9,7 @@ import { TokenFormatProvider } from "./ui/foundation/TokenFormatProvider.jsx";
 import App from "./App.jsx";
 import { initAnalytics } from "./lib/analytics.js";
 import { initSentry } from "./lib/sentry.js";
+import { DashboardRouteError } from "./components/DashboardRouteError.jsx";
 import "@fontsource/geist-mono/400.css";
 import "@fontsource/geist-mono/500.css";
 import "@fontsource/geist-mono/700.css";
@@ -19,7 +20,7 @@ initSentry();
 initAnalytics();
 
 const router = createBrowserRouter([
-  { path: "*", element: <App /> },
+  { path: "*", element: <App />, errorElement: <DashboardRouteError /> },
 ]);
 
 createRoot(document.getElementById("root")).render(
