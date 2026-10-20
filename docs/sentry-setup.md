@@ -2,33 +2,59 @@
 
 Org: [`tokentracker`](https://tokentracker.sentry.io/) (Sponsored Business).
 
-## Projects to create
+## Projects (created)
 
-Create **two** projects under the org (Settings → Projects → Create Project):
-
-| Project slug (suggested) | Platform | Used by |
-|---|---|---|
-| `tokentracker-dashboard` | React / JavaScript | `dashboard/` (`@sentry/react`), including desktop WebViews |
-| `tokentracker-node` | Node.js | CLI + EmbeddedServer (`@sentry/node` in `src/lib/sentry.js`) |
+| Project slug | Platform | Used by | DSN env |
+|---|---|---|---|
+| `tokentracker-dashboard` | React / JavaScript | `dashboard/` (`@sentry/react`), including desktop WebViews | `VITE_SENTRY_DSN` |
+| `tokentracker-node` | Node.js | CLI + EmbeddedServer (`@sentry/node` in `src/lib/sentry.js`) | `TOKENTRACKER_SENTRY_DSN` |
 
 Do **not** add native Swift / .NET / Tauri projects in v1 — those shells mostly host the dashboard + Node runtime above.
 
-## Wire DSNs (public client keys)
+Keys (rotate in Sentry UI if needed):
 
-After creating each project, copy its **DSN** from Project Settings → Client Keys (DSN).
+- Dashboard: https://tokentracker.sentry.io/settings/projects/tokentracker-dashboard/keys/
+- Node: https://tokentracker.sentry.io/settings/projects/tokentracker-node/keys/
 
-| Surface | Env var | Where |
+## Where DSNs are wired (do not commit DSN strings)
+
+Public client DSNs are safe to embed (same model as PostHog / InsForge anon key), but this repo keeps them **out of git** and injects at build/deploy time.
+
+| Surface | Env var | Where it is set |
 |---|---|---|
-| Dashboard / WebViews | `VITE_SENTRY_DSN` | Vercel env for `www.tokentracker.cc`, and release builds that embed `dashboard/dist` |
-| Node CLI / EmbeddedServer | `TOKENTRACKER_SENTRY_DSN` | Process env for local CLI; optional in desktop EmbeddedServer env |
+| Hosted dashboard (`www.tokentracker.cc`) | `VITE_SENTRY_DSN` | **Vercel** project env (Production + Preview). Must be set in the Vercel dashboard or `vercel env add` while logged in as the project owner. |
+| CI / release dashboard builds (desktop WebViews + npm `dashboard/dist`) | `VITE_SENTRY_DSN` | GitHub Actions secret `VITE_SENTRY_DSN`, passed into every `Build dashboard` step in `ci.yml`, `npm-publish.yml`, `release-dmg.yml`, `release-windows.yml` as `${{ secrets.VITE_SENTRY_DSN }}` (value is not echoed). |
+| Node CLI / EmbeddedServer | `TOKENTRACKER_SENTRY_DSN` | Process env for local/operator use. Optional; leave unset to keep Node Sentry off. Not injected by release workflows yet (desktop shells do not currently forward this var). |
 
-Public DSNs are safe to embed (same model as PostHog). Until a DSN is set, Sentry stays fully off.
+Until a DSN is set for a surface, Sentry stays fully off there.
 
 Optional: `TOKENTRACKER_SENTRY_ENVIRONMENT` overrides the Node environment tag (`production` / `development`).
 
-## Auth for `sentry-cli` / API
+Local / `.env` names (empty values only) are listed in [`.env.example`](../.env.example).
 
-Creating projects and uploading source maps needs an org auth token (not committed):
+### Vercel (hosted site)
+
+From a machine logged into the Vercel project that serves `www.tokentracker.cc` (dashboard app):
+
+```bash
+cd dashboard
+printf '%s' "$VITE_SENTRY_DSN" | npx vercel env add VITE_SENTRY_DSN production
+printf '%s' "$VITE_SENTRY_DSN" | npx vercel env add VITE_SENTRY_DSN preview
+```
+
+Then redeploy production so the Vite build picks up the var. Or set the same name under Project → Settings → Environment Variables in the Vercel UI.
+
+### GitHub Actions secret
+
+Already configured on `xiufengsun/TokenTracker` as `VITE_SENTRY_DSN`. To rotate:
+
+```bash
+printf '%s' 'NEW_DSN' | gh secret set VITE_SENTRY_DSN -R xiufengsun/TokenTracker
+```
+
+## Auth for `sentry-cli` / source maps
+
+Creating projects and uploading source maps needs an org auth token (not committed). **Skipped for v1** (no `SENTRY_AUTH_TOKEN` yet).
 
 1. Sentry → Settings → Auth Tokens (or Custom Integrations → Internal Integration) with `project:write` + `org:read`.
 2. `export SENTRY_AUTH_TOKEN=...`
