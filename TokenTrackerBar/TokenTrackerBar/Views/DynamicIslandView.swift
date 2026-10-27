@@ -2,8 +2,9 @@ import SwiftUI
 
 /// SwiftUI content of the Dynamic Island panel.
 ///
-/// Collapsed: a notch-hugging black bar — today's tokens on the left wing,
-/// today's cost on the right wing, the center occluded by the hardware notch.
+/// Collapsed (island): a notch-hugging black bar — today's tokens on the left
+/// wing, today's cost on the right wing, the center occluded by the hardware
+/// notch. Collapsed (edge): a fixed right-edge pill with no metric text.
 /// Hover: expands into a spend summary (today / 7d / 30d / total) plus the
 /// usage-limits bars, all fed by the shared `DashboardViewModel`.
 ///
@@ -63,37 +64,56 @@ struct DynamicIslandView: View {
             }
             self.wingMetrics = resolveWingMetrics()
             self.compactModeEnabled = DynamicIslandCompactPolicy.isEnabled()
+                && DynamicIslandPlacementPolicy.compactModeApplies(for: state.placement)
         }
         .onChange(of: state.settingsTick) { _ in
             self.wingMetrics = resolveWingMetrics()
             self.compactModeEnabled = DynamicIslandCompactPolicy.isEnabled()
+                && DynamicIslandPlacementPolicy.compactModeApplies(for: state.placement)
         }
     }
 
     private var island: some View {
         let geo = state.geometry
         let expanded = state.isExpanded
+        let isEdge = state.placement == .edge
         let islandWidth = expanded
             ? max(DynamicIslandGeometry.expandedWidth, geo.collapsedWidth)
             : geo.collapsedWidth
-        let shoulderRadius = expanded ? CGFloat(8) : min(6, geo.collapsedHeight / 4)
+        // Edge collapsed is a plain capsule flush to the bezel — no notch
+        // shoulder flare. Island mode keeps the native notch silhouette.
+        let shoulderRadius: CGFloat = {
+            if isEdge { return 0 }
+            return expanded ? CGFloat(8) : min(6, geo.collapsedHeight / 4)
+        }()
         let renderedWidth = islandWidth + shoulderRadius * 2
         let revealWidth = DynamicIslandVisibilityPolicy.revealWidth(
             progress: state.visibilityProgress,
             fullWidth: renderedWidth,
-            centerGapWidth: geo.centerGapWidth,
-            hasNotch: geo.hasNotch,
+            centerGapWidth: isEdge ? 0 : geo.centerGapWidth,
+            hasNotch: isEdge ? false : geo.hasNotch,
             isDismissing: state.isVisibilityDismissing
         )
+        let bottomRadius: CGFloat = {
+            if isEdge && !expanded {
+                return min(islandWidth, geo.collapsedHeight) / 2
+            }
+            return expanded ? 22 : min(12, geo.collapsedHeight / 2.5)
+        }()
         let shape = IslandRoundedRectangle(
             topShoulderRadius: shoulderRadius,
-            bottomRadius: expanded ? 22 : min(12, geo.collapsedHeight / 2.5)
+            bottomRadius: bottomRadius
         )
 
-        return VStack(spacing: 0) {
+        let content = VStack(spacing: 0) {
             if !expanded {
-                collapsedRow
-                    .transition(.opacity)
+                if isEdge {
+                    edgeCollapsedPill
+                        .transition(.opacity)
+                } else {
+                    collapsedRow
+                        .transition(.opacity)
+                }
             } else {
                 expandedHeaderRow
                     .transition(.opacity)
@@ -109,31 +129,50 @@ struct DynamicIslandView: View {
         // content width so it never squeezes either metric wing.
         .padding(.horizontal, shoulderRadius)
         .fixedSize(horizontal: false, vertical: expanded)
-        .clipShape(shape)
-        .background(
-            shape.fill(Color.black)
-                .shadow(color: .black.opacity(expanded ? 0.25 : 0), radius: expanded ? 10 : 0, x: 0, y: expanded ? 5 : 0)
-                .shadow(color: .black.opacity(expanded ? 0.15 : 0), radius: expanded ? 3 : 0, x: 0, y: expanded ? 1 : 0)
-        )
-        .overlay(
-            Group {
-                if expanded {
-                    shape
-                        .stroke(
-                            LinearGradient(
-                                colors: [
-                                    Color.white.opacity(0.18),
-                                    Color.white.opacity(0.05),
-                                    Color.white.opacity(0.08)
-                                ],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            ),
-                            lineWidth: 0.5
+
+        // Edge collapsed uses a plain capsule (CodeNotch-style). Island mode
+        // keeps the notch silhouette; expanded edge reuses the same rounded card.
+        let chrome: AnyView = {
+            if isEdge && !expanded {
+                return AnyView(
+                    content
+                        .clipShape(Capsule())
+                        .background(
+                            Capsule().fill(Color.black)
                         )
-                }
+                )
             }
-        )
+            return AnyView(
+                content
+                    .clipShape(shape)
+                    .background(
+                        shape.fill(Color.black)
+                            .shadow(color: .black.opacity(expanded ? 0.25 : 0), radius: expanded ? 10 : 0, x: 0, y: expanded ? 5 : 0)
+                            .shadow(color: .black.opacity(expanded ? 0.15 : 0), radius: expanded ? 3 : 0, x: 0, y: expanded ? 1 : 0)
+                    )
+                    .overlay(
+                        Group {
+                            if expanded {
+                                shape
+                                    .stroke(
+                                        LinearGradient(
+                                            colors: [
+                                                Color.white.opacity(0.18),
+                                                Color.white.opacity(0.05),
+                                                Color.white.opacity(0.08)
+                                            ],
+                                            startPoint: .topLeading,
+                                            endPoint: .bottomTrailing
+                                        ),
+                                        lineWidth: 0.5
+                                    )
+                            }
+                        }
+                    )
+            )
+        }()
+
+        return chrome
         // Report the rendered island height back to the controller for
         // hit-test sizing. This runs AFTER layout so it reads the actual
         // natural content height — no chicken-and-egg.
@@ -146,14 +185,32 @@ struct DynamicIslandView: View {
             onExpandedHeightChanged(h)
         }
         // Reveal from the center without scaling the contents.
-        .mask(alignment: .center) {
+        .mask(alignment: isEdge ? .trailing : .center) {
             Rectangle()
                 .frame(width: revealWidth)
         }
-        // Top-align inside the always-expanded panel so height/width springs
-        // grow downward / outward instead of from the view's center (which
-        // would pull the top edge away from the screen and flash wallpaper).
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        // Island: top-center. Edge: top-trailing so the pill / card hugs the
+        // right bezel and expands leftward.
+        .frame(
+            maxWidth: .infinity,
+            maxHeight: .infinity,
+            alignment: isEdge ? .topTrailing : .top
+        )
+    }
+
+    /// Fixed right-edge collapsed chrome: no token/spend text (CodeNotch-style).
+    private var edgeCollapsedPill: some View {
+        let geo = state.geometry
+        return ZStack {
+            // A quiet brand mark so the pill reads as intentional chrome, not
+            // an empty sliver. Metric strings stay out of the collapsed state.
+            Image(systemName: "circle.hexagongrid.fill")
+                .font(.system(size: 8, weight: .semibold))
+                .foregroundStyle(Color.white.opacity(0.75))
+                .rotationEffect(.degrees(90))
+        }
+        .frame(width: geo.collapsedWidth, height: geo.collapsedHeight)
+        .contentShape(Rectangle())
     }
 
     // MARK: - Collapsed wings
@@ -415,6 +472,11 @@ struct DynamicIslandView: View {
 
     private var expandedHeaderRow: some View {
         let geo = state.geometry
+        // Edge collapsed height is the vertical pill length (~80); the expanded
+        // header should stay menu-bar-ish regardless of placement.
+        let headerHeight: CGFloat = state.placement == .edge
+            ? 36
+            : geo.collapsedHeight
         let appIcon = NSApp.applicationIconImage ?? NSImage(named: NSImage.applicationIconName) ?? NSImage()
         return HStack(spacing: 0) {
             Button(action: {
@@ -509,7 +571,7 @@ struct DynamicIslandView: View {
             .padding(.leading, 8)
         }
         .padding(.horizontal, 14)
-        .frame(height: geo.collapsedHeight)
+        .frame(height: headerHeight)
     }
 
     // MARK: - Expanded detail

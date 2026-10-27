@@ -110,6 +110,9 @@ final class DynamicIslandState: ObservableObject {
     /// Bumped on `.nativeSettingsChanged` so currency/locale changes re-render
     /// the cost strings without waiting for the next data refresh.
     @Published var settingsTick = 0
+    /// Island (top-center / notch) vs edge (right-edge pill). Drives layout in
+    /// both the controller and the SwiftUI view.
+    @Published var placement: DynamicIslandPlacement = .island
 }
 
 /// Notch-hugging "Dynamic Island" (boring.notch-style): a transparent,
@@ -162,6 +165,7 @@ final class DynamicIslandController: NSObject {
     init(viewModel: DashboardViewModel) {
         self.viewModel = viewModel
         super.init()
+        state.placement = DynamicIslandPlacementPolicy.placement()
 
         observers.append(NotificationCenter.default.addObserver(
             forName: NSApplication.didChangeScreenParametersNotification,
@@ -188,7 +192,7 @@ final class DynamicIslandController: NSObject {
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            Task { @MainActor [weak self] in self?.state.settingsTick += 1 }
+            Task { @MainActor [weak self] in self?.handleSettingsChanged() }
         })
         let workspace = NSWorkspace.shared.notificationCenter
         observers.append(workspace.addObserver(
@@ -243,10 +247,34 @@ final class DynamicIslandController: NSObject {
 
     /// Re-show the island on launch if it was enabled when the app last quit.
     func restoreIfNeeded() {
+        state.placement = DynamicIslandPlacementPolicy.placement()
         fullscreenActive = readFullscreenActive()
         applyPresence()
         if fullscreenActive {
             armFullscreenSettleRetries()
+        }
+    }
+
+    /// Re-read placement after Labs / menu changes and re-pin the panel.
+    func reloadPlacement() {
+        let next = DynamicIslandPlacementPolicy.placement()
+        let changed = state.placement != next
+        state.placement = next
+        if changed, state.isExpanded {
+            collapseWorkItem?.cancel()
+            state.isExpanded = false
+        }
+        repositionPanel()
+        panel?.updateHitRegion()
+        state.settingsTick += 1
+    }
+
+    private func handleSettingsChanged() {
+        let next = DynamicIslandPlacementPolicy.placement()
+        if state.placement != next {
+            reloadPlacement()
+        } else {
+            state.settingsTick += 1
         }
     }
 
@@ -456,15 +484,30 @@ final class DynamicIslandController: NSObject {
 
     // MARK: - Screen + geometry
 
-    /// Prefer a screen with a hardware notch; otherwise fall back to the main
-    /// screen with a simulated island.
+    /// Island mode prefers a hardware-notched screen; edge mode prefers the
+    /// main display (no notch required).
     private func targetScreen() -> NSScreen? {
-        NSScreen.screens.first(where: { $0.safeAreaInsets.top > 0 })
-            ?? NSScreen.main
-            ?? NSScreen.screens.first
+        if DynamicIslandPlacementPolicy.prefersNotchedScreen(for: state.placement) {
+            return NSScreen.screens.first(where: { $0.safeAreaInsets.top > 0 })
+                ?? NSScreen.main
+                ?? NSScreen.screens.first
+        }
+        return NSScreen.main ?? NSScreen.screens.first
     }
 
     private func geometry(for screen: NSScreen) -> DynamicIslandGeometry {
+        if state.placement == .edge {
+            let size = DynamicIslandPlacementPolicy.edgeCollapsedSize()
+            // Encode the fixed pill as a center-only strip (no text wings):
+            // collapsedWidth == centerGapWidth when wingWidth is 0.
+            return DynamicIslandGeometry(
+                centerGapWidth: size.width,
+                collapsedHeight: size.height,
+                wingWidth: 0,
+                hasNotch: false,
+                islandCenterX: screen.frame.maxX - size.width / 2
+            )
+        }
         // Carry the current content-measured wing width across screen changes;
         // the view re-measures and corrects it if the labels differ.
         let wingWidth = max(DynamicIslandGeometry.minWingWidth, state.geometry.wingWidth)
@@ -498,6 +541,7 @@ final class DynamicIslandController: NSObject {
     /// The view measured its wing labels; adopt the tight width so the
     /// collapsed hit-test pill stays snug around the text.
     private func applyWingWidth(_ width: CGFloat) {
+        guard DynamicIslandPlacementPolicy.appliesWingMetrics(for: state.placement) else { return }
         let clamped = max(DynamicIslandGeometry.minWingWidth, width)
         guard abs(clamped - state.geometry.wingWidth) > 0.5 else { return }
         state.geometry.wingWidth = clamped
@@ -523,6 +567,13 @@ final class DynamicIslandController: NSObject {
     private func panelFrame(on screen: NSScreen) -> NSRect {
         let bleed = DynamicIslandGeometry.shadowBleed
         let panelW = max(DynamicIslandGeometry.expandedWidth, state.geometry.collapsedWidth) + bleed * 2
+        if state.placement == .edge {
+            return DynamicIslandPlacementPolicy.edgePanelFrame(
+                screenFrame: screen.frame,
+                visibleBottom: screen.visibleFrame.minY,
+                panelWidth: panelW
+            )
+        }
         let panelH = DynamicIslandLayoutPolicy.panelHeight(
             screenTop: screen.frame.maxY,
             visibleBottom: screen.visibleFrame.minY
@@ -543,6 +594,15 @@ final class DynamicIslandController: NSObject {
         let geo = state.geometry
         let panelW = panel.frame.width
         let panelH = panel.frame.height
+        if state.placement == .edge {
+            return DynamicIslandPlacementPolicy.edgeHitRect(
+                panelSize: CGSize(width: panelW, height: panelH),
+                isExpanded: state.isExpanded,
+                collapsedSize: CGSize(width: geo.collapsedWidth, height: geo.collapsedHeight),
+                expandedWidth: max(DynamicIslandGeometry.expandedWidth, geo.collapsedWidth),
+                expandedHeight: min(max(state.expandedHeight, geo.collapsedHeight), panelH)
+            )
+        }
         let width = state.isExpanded
             ? max(DynamicIslandGeometry.expandedWidth, geo.collapsedWidth)
             : geo.collapsedWidth
