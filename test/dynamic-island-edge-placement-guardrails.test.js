@@ -51,9 +51,32 @@ test("controller reloads placement and pins edge panel to the right", () => {
 
 test("view uses a fixed edge pill without collapsed metric wings", () => {
   assert.match(viewSource, /edgeCollapsedPill/);
-  assert.match(viewSource, /Capsule\(\)/);
+  assert.match(viewSource, /EdgeNotchShape/);
   assert.match(viewSource, /showsCollapsedMetrics\(for: state\.placement\)/);
   assert.match(viewSource, /state\.placement == \.edge/);
+  assert.doesNotMatch(
+    viewSource,
+    /clipShape\(Capsule\(\)\)/,
+    "collapsed edge must use EdgeNotchShape, not a bare Capsule",
+  );
+});
+
+test("controller uses CodeNotch-like unfold spring for edge expand", () => {
+  assert.match(controllerSource, /EdgeNotchMotion\.unfold/);
+  assert.match(controllerSource, /state\.placement == \.edge/);
+});
+
+test("edge shape + motion files exist", () => {
+  const shape = fs.readFileSync(
+    path.join(root, "TokenTrackerBar/TokenTrackerBar/Views/EdgeNotchShape.swift"),
+    "utf8",
+  );
+  assert.match(shape, /struct EdgeNotchShape/);
+  assert.match(shape, /enum EdgeNotchMotion/);
+  assert.match(shape, /response: 0\.62/);
+  assert.match(shape, /dampingFraction: 0\.72/);
+  assert.match(policySource, /edgeCurlRadius/);
+  assert.match(policySource, /edgeCornerRadius/);
 });
 
 test("reloadPlacement refreshes fullscreen presence for the new screen", () => {

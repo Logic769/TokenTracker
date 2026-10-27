@@ -40,6 +40,21 @@ final class DynamicIslandPlacementPolicyTests: XCTestCase {
         XCTAssertEqual(size.width, DynamicIslandPlacementPolicy.edgePillDepth)
         XCTAssertEqual(size.height, DynamicIslandPlacementPolicy.edgePillLength)
         XCTAssertGreaterThan(size.height, size.width)
+        // CodeNotch-inspired resting proportions (~10×80), not a square tile.
+        XCTAssertEqual(size.width, 10)
+        XCTAssertEqual(size.height, 80)
+    }
+
+    func testEdgeShapeRadiiDifferCollapsedVsExpanded() {
+        XCTAssertGreaterThan(
+            DynamicIslandPlacementPolicy.edgeCurlRadius(isExpanded: false),
+            DynamicIslandPlacementPolicy.edgeCurlRadius(isExpanded: true)
+        )
+        XCTAssertLessThan(
+            DynamicIslandPlacementPolicy.edgeCornerRadius(isExpanded: false),
+            DynamicIslandPlacementPolicy.edgeCornerRadius(isExpanded: true)
+        )
+        XCTAssertEqual(DynamicIslandPlacementPolicy.edgeCornerRadius(isExpanded: true), 22)
     }
 
     func testEdgePanelFramePinsToRightEdge() {
@@ -55,7 +70,7 @@ final class DynamicIslandPlacementPolicyTests: XCTestCase {
         XCTAssertEqual(frame.height, DynamicIslandLayoutPolicy.panelHeight(screenTop: 900, visibleBottom: 40))
     }
 
-    func testEdgeHitRectIsTrailingCollapsedPill() {
+    func testEdgeHitRectIsVerticallyCenteredTrailingPill() {
         let panel = CGSize(width: 536, height: 800)
         let collapsed = DynamicIslandPlacementPolicy.edgeCollapsedSize()
         let rect = DynamicIslandPlacementPolicy.edgeHitRect(
@@ -66,12 +81,14 @@ final class DynamicIslandPlacementPolicyTests: XCTestCase {
             expandedHeight: 400
         )
         XCTAssertEqual(rect.maxX, panel.width)
-        XCTAssertEqual(rect.maxY, panel.height)
         XCTAssertEqual(rect.width, DynamicIslandPlacementPolicy.edgeHotZoneDepth)
         XCTAssertEqual(rect.height, collapsed.height)
+        // Mid-bezel like CodeNotch — not glued to the menu bar.
+        XCTAssertEqual(rect.midY, panel.height / 2, accuracy: 0.5)
+        XCTAssertEqual(DynamicIslandPlacementPolicy.edgeHotZoneDepth, 36)
     }
 
-    func testEdgeHitRectExpandedUsesTrailingCard() {
+    func testEdgeHitRectExpandedIsVerticallyCenteredTrailingCard() {
         let panel = CGSize(width: 536, height: 800)
         let collapsed = DynamicIslandPlacementPolicy.edgeCollapsedSize()
         let rect = DynamicIslandPlacementPolicy.edgeHitRect(
@@ -82,8 +99,8 @@ final class DynamicIslandPlacementPolicyTests: XCTestCase {
             expandedHeight: 420
         )
         XCTAssertEqual(rect.maxX, panel.width)
-        XCTAssertEqual(rect.maxY, panel.height)
         XCTAssertEqual(rect.width, 480)
         XCTAssertEqual(rect.height, 420)
+        XCTAssertEqual(rect.midY, panel.height / 2, accuracy: 0.5)
     }
 }
