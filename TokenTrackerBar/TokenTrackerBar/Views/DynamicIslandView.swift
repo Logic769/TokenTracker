@@ -77,9 +77,12 @@ struct DynamicIslandView: View {
         let geo = state.geometry
         let expanded = state.isExpanded
         let isEdge = state.placement == .edge
+        let edgeWaking = isEdge && state.isEdgeWaking && !expanded
+        // Wake deepens the resting pill slightly before unfold (edgeWakeBoost).
+        let wakeBoost: CGFloat = edgeWaking ? DynamicIslandPlacementPolicy.edgeWakeBoost : 0
         let islandWidth = expanded
             ? max(DynamicIslandGeometry.expandedWidth, geo.collapsedWidth)
-            : geo.collapsedWidth
+            : geo.collapsedWidth + wakeBoost
         // Island mode keeps the native notch silhouette. Edge mode uses the
         // CodeNotch-inspired bezel-welded flare (`EdgeNotchShape`) for both
         // collapsed and expanded so the spring morphs one concrete shape.
@@ -149,9 +152,9 @@ struct DynamicIslandView: View {
                         .background(
                             edgeShape.fill(Color.black)
                                 .shadow(
-                                    color: .black.opacity(expanded ? 0.28 : 0.18),
-                                    radius: expanded ? 14 : 6,
-                                    x: expanded ? -4 : -2,
+                                    color: .black.opacity(expanded ? 0.28 : (edgeWaking ? 0.26 : 0.18)),
+                                    radius: expanded ? 14 : (edgeWaking ? 10 : 6),
+                                    x: expanded ? -4 : (edgeWaking ? -3 : -2),
                                     y: 0
                                 )
                         )
@@ -160,37 +163,18 @@ struct DynamicIslandView: View {
                                 .stroke(
                                     LinearGradient(
                                         colors: [
-                                            Color.white.opacity(expanded ? 0.16 : 0.22),
-                                            Color.white.opacity(0.04),
-                                            Color.white.opacity(expanded ? 0.10 : 0.08)
+                                            Color.white.opacity(expanded ? 0.16 : (edgeWaking ? 0.18 : 0.10)),
+                                            Color.white.opacity(edgeWaking && !expanded ? 0.06 : 0.04),
+                                            Color.white.opacity(expanded ? 0.10 : (edgeWaking ? 0.10 : 0.05))
                                         ],
                                         startPoint: .topLeading,
                                         endPoint: .bottomTrailing
                                     ),
-                                    lineWidth: expanded ? 0.5 : 0.6
+                                    // One soft rim only — no vertical grip hairline.
+                                    // Wake brightens the rim slightly; rest stays quiet.
+                                    lineWidth: expanded ? 0.5 : (edgeWaking ? 0.55 : 0.4)
                                 )
                         )
-                        // Soft inward specular so the thin resting pill reads as
-                        // moulded glass, not a flat black stick.
-                        .overlay(alignment: .leading) {
-                            if !expanded {
-                                Capsule()
-                                    .fill(
-                                        LinearGradient(
-                                            colors: [
-                                                Color.white.opacity(0.22),
-                                                Color.white.opacity(0.0)
-                                            ],
-                                            startPoint: .leading,
-                                            endPoint: .trailing
-                                        )
-                                    )
-                                    .frame(width: 2)
-                                    .padding(.vertical, 14)
-                                    .padding(.leading, 2)
-                                    .allowsHitTesting(false)
-                            }
-                        }
                 )
             }
             return AnyView(
@@ -249,21 +233,32 @@ struct DynamicIslandView: View {
         )
     }
 
-    /// Fixed right-edge collapsed chrome: no token/spend text. Three soft
-    /// orb hints echo CodeNotch's resting language without copying its goo.
+    /// Fixed right-edge collapsed chrome: quiet 3-dot stack on a solid black
+    /// `EdgeNotchShape` body. No vertical specular hairline — one soft rim on
+    /// the shape is enough. Wake (via `state.isEdgeWaking`) brightens the dots
+    /// and gently scales them before unfold.
     private var edgeCollapsedPill: some View {
         let geo = state.geometry
+        let waking = state.isEdgeWaking
+        // Quieter than the old grip chrome: smaller dots, softer contrast,
+        // more breathing room. Mid dot leads; sides stay subordinate.
+        let midOpacity: Double = waking ? 0.72 : 0.40
+        let sideOpacity: Double = waking ? 0.38 : 0.20
+        let dotSize: CGFloat = waking ? 3.0 : 2.75
+        let spacing: CGFloat = 8
         return ZStack {
-            VStack(spacing: 6) {
+            VStack(spacing: spacing) {
                 ForEach(0..<3, id: \.self) { index in
                     Circle()
-                        .fill(Color.white.opacity(index == 1 ? 0.55 : 0.28))
-                        .frame(width: 3.5, height: 3.5)
+                        .fill(Color.white.opacity(index == 1 ? midOpacity : sideOpacity))
+                        .frame(width: dotSize, height: dotSize)
                 }
             }
+            .scaleEffect(waking ? 1.06 : 1.0)
             .accessibilityHidden(true)
         }
-        .frame(width: geo.collapsedWidth, height: geo.collapsedHeight)
+        .frame(width: geo.collapsedWidth + (waking ? DynamicIslandPlacementPolicy.edgeWakeBoost : 0),
+               height: geo.collapsedHeight)
         .contentShape(Rectangle())
         .accessibilityLabel(Strings.menuPlacementEdge)
     }

@@ -31,7 +31,8 @@ enum DynamicIslandPlacementPolicy {
     // MARK: - Collapsed pill (CodeNotch resting proportions)
     //
     // CodeNotch: Design.scale 44/117 → pillWidth ≈ 9.8 pt, pillHeight ≈ 79 pt.
-    // We stay a hair thicker so a tiny brand glyph / orb hint stays readable.
+    // Depth 10 holds a quiet 3-dot stack (no specular hairline). `edgeWakeBoost`
+    // deepens the pill briefly on hover before unfold.
 
     /// Depth of the collapsed right-edge pill into the screen (pt).
     static let edgePillDepth: CGFloat = 10

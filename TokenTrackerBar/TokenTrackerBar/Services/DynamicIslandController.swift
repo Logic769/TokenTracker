@@ -113,6 +113,9 @@ final class DynamicIslandState: ObservableObject {
     /// Island (top-center / notch) vs edge (right-edge pill). Drives layout in
     /// both the controller and the SwiftUI view.
     @Published var placement: DynamicIslandPlacement = .island
+    /// Edge only: brief pre-expand "wake" (deeper pill + brighter dots) before
+    /// the full unfold. Island mode never sets this.
+    @Published var isEdgeWaking = false
 }
 
 /// Notch-hugging "Dynamic Island" (boring.notch-style): a transparent,
@@ -127,6 +130,8 @@ final class DynamicIslandController: NSObject {
     /// Delay before collapsing after the pointer leaves, so grazing the island
     /// edge doesn't flap it shut.
     private static let collapseDelay: TimeInterval = 0.25
+    /// Edge only: brief deepen/brighten beat before full unfold.
+    private static let edgeWakeDelay: TimeInterval = 0.12
 
     private let viewModel: DashboardViewModel
     private let state = DynamicIslandState()
@@ -136,6 +141,8 @@ final class DynamicIslandController: NSObject {
     /// hit-test wrapper).
     private var hostingController: NSHostingController<DynamicIslandView>?
     private var collapseWorkItem: DispatchWorkItem?
+    /// Schedules edge expand after the wake beat; cancelled on hover-out.
+    private var wakeWorkItem: DispatchWorkItem?
     private var visibilityWorkItem: DispatchWorkItem?
     private var visibilityTransitions = DynamicIslandVisibilityTransitionTracker()
     /// Keeps the transparent panel click-through during transitions.
@@ -264,6 +271,9 @@ final class DynamicIslandController: NSObject {
             collapseWorkItem?.cancel()
             state.isExpanded = false
         }
+        if changed {
+            cancelEdgeWake()
+        }
         // Placement can change which screen we care about (notched vs main),
         // so refresh fullscreen presence before / while re-pinning — otherwise
         // a stale fullscreenActive from the previous screen keeps the new
@@ -298,6 +308,7 @@ final class DynamicIslandController: NSObject {
 
         // Always reveal from the compact, non-interactive state.
         state.isVisibilityDismissing = false
+        cancelEdgeWake()
         state.isExpanded = false
         state.isPanelVisible = true
         acceptsIslandInteraction = false
@@ -343,6 +354,7 @@ final class DynamicIslandController: NSObject {
     func hide() {
         collapseWorkItem?.cancel()
         collapseWorkItem = nil
+        cancelEdgeWake()
         let transition = beginVisibilityTransition()
         acceptsIslandInteraction = false
         panel?.updateHitRegion()
@@ -411,16 +423,76 @@ final class DynamicIslandController: NSObject {
             ) else { return }
             collapseWorkItem?.cancel()
             collapseWorkItem = nil
-            expand()
+            if state.placement == .edge {
+                beginEdgeWakeThenExpand()
+            } else {
+                cancelEdgeWake()
+                expand()
+            }
         } else {
             collapseWorkItem?.cancel()
             collapseWorkItem = nil
+            cancelEdgeWake()
             // A menu is tracking — keep the island open; endMenuHold decides.
             guard menuHoldCount == 0 else { return }
             let item = DispatchWorkItem { [weak self] in self?.collapse() }
             collapseWorkItem = item
             DispatchQueue.main.asyncAfter(deadline: .now() + Self.collapseDelay, execute: item)
         }
+    }
+
+    /// Edge resting → short wake (deeper pill + brighter dots) → unfold.
+    /// Island mode never enters this path.
+    private func beginEdgeWakeThenExpand() {
+        guard state.placement == .edge else {
+            expand()
+            return
+        }
+        guard !state.isExpanded else { return }
+        if state.isEdgeWaking, wakeWorkItem != nil { return }
+        wakeWorkItem?.cancel()
+        let reduce = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        if reduce {
+            state.isEdgeWaking = false
+            expand()
+            return
+        }
+        withAnimation(EdgeNotchMotion.wake) {
+            state.isEdgeWaking = true
+        }
+        panel?.updateHitRegion()
+        let item = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.wakeWorkItem = nil
+            // Drop stale wake if the panel hid or the pointer left during the beat.
+            guard self.shouldShowPanel,
+                  self.state.isPanelVisible,
+                  self.state.placement == .edge,
+                  !self.state.isExpanded,
+                  self.isPointerOverIsland()
+            else {
+                self.cancelEdgeWake()
+                return
+            }
+            self.expand()
+        }
+        wakeWorkItem = item
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.edgeWakeDelay, execute: item)
+    }
+
+    private func cancelEdgeWake() {
+        wakeWorkItem?.cancel()
+        wakeWorkItem = nil
+        guard state.isEdgeWaking else { return }
+        let reduce = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        if reduce {
+            state.isEdgeWaking = false
+        } else {
+            withAnimation(EdgeNotchMotion.wake) {
+                state.isEdgeWaking = false
+            }
+        }
+        panel?.updateHitRegion()
     }
 
     /// Menu tracking started from the island (gear button / right-click).
@@ -460,6 +532,10 @@ final class DynamicIslandController: NSObject {
 
     private func expand() {
         guard !state.isExpanded else { return }
+        // Wake chrome yields to the unfolded panel.
+        wakeWorkItem?.cancel()
+        wakeWorkItem = nil
+        state.isEdgeWaking = false
         // Panel frame stays put — only the black shape springs open.
         // Resizing the window mid-animation was what opened the seam.
         // Edge uses CodeNotch-like liquid unfold (0.62/0.72); island keeps
@@ -481,6 +557,7 @@ final class DynamicIslandController: NSObject {
 
     private func collapse() {
         guard state.isExpanded else { return }
+        cancelEdgeWake()
         let reduce = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
         if reduce {
             state.isExpanded = false
