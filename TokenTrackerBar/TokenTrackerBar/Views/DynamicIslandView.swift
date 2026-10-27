@@ -107,6 +107,12 @@ struct DynamicIslandView: View {
         let edgeCorner = DynamicIslandPlacementPolicy.edgeCornerRadius(isExpanded: expanded)
         let edgeShape = EdgeNotchShape(curlRadius: edgeCurl, cornerRadius: edgeCorner)
 
+        // EdgeNotchShape's top/bottom curl eats into the content rect near the
+        // bezel; give expanded edge chrome matching vertical inset so header
+        // controls are not clipped by the flare.
+        let edgeContentInset: CGFloat = (isEdge && expanded)
+            ? DynamicIslandPlacementPolicy.edgeCurlExpanded
+            : 0
         let content = VStack(spacing: 0) {
             if !expanded {
                 if DynamicIslandPlacementPolicy.showsCollapsedMetrics(for: state.placement) {
@@ -126,6 +132,7 @@ struct DynamicIslandView: View {
         // Width is always explicit. Height: nil when expanded lets the VStack
         // size naturally to its content; explicit when collapsed.
         .frame(width: islandWidth, height: expanded ? nil : geo.collapsedHeight, alignment: .top)
+        .padding(.vertical, edgeContentInset)
         // The native notch shoulder flares outward at the screen edge, then
         // curves inward to the content body. Keep that flare outside the
         // content width so it never squeezes either metric wing.

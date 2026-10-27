@@ -94,7 +94,9 @@ enum DynamicIslandPlacementPolicy {
     }
 
     /// Panel frame for edge mode: same generous size as the island panel, but
-    /// pinned to the right edge of the screen so expand grows leftward.
+    /// pinned to the right edge and vertically centered in the usable desktop
+    /// strip so mid-bezel chrome lands at true screen midY (not mid of a
+    /// top-pinned strip on tall displays).
     static func edgePanelFrame(
         screenFrame: CGRect,
         visibleBottom: CGFloat,
@@ -105,11 +107,14 @@ enum DynamicIslandPlacementPolicy {
             visibleBottom: visibleBottom
         )
         let width = max(panelWidth, DynamicIslandLayoutPolicy.expandedWidth)
+        let available = max(0, screenFrame.maxY - visibleBottom)
+        let height = min(panelHeight, available)
+        let y = visibleBottom + (available - height) / 2
         return CGRect(
             x: screenFrame.maxX - width,
-            y: screenFrame.maxY - panelHeight,
+            y: y,
             width: width,
-            height: panelHeight
+            height: height
         )
     }
 

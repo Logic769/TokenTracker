@@ -61,6 +61,14 @@ test("view uses a fixed edge pill without collapsed metric wings", () => {
   );
 });
 
+test("expanded edge content is inset for EdgeNotch curl", () => {
+  assert.match(viewSource, /edgeContentInset/);
+  assert.match(viewSource, /edgeCurlExpanded/);
+  assert.match(policySource, /edgePanelFrame/);
+  // Panel must center vertically for mid-bezel placement on tall displays.
+  assert.match(policySource, /\(available - height\) \/ 2/);
+});
+
 test("controller uses CodeNotch-like unfold spring for edge expand", () => {
   assert.match(controllerSource, /EdgeNotchMotion\.unfold/);
   assert.match(controllerSource, /state\.placement == \.edge/);

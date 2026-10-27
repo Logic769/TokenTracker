@@ -57,17 +57,36 @@ final class DynamicIslandPlacementPolicyTests: XCTestCase {
         XCTAssertEqual(DynamicIslandPlacementPolicy.edgeCornerRadius(isExpanded: true), 22)
     }
 
-    func testEdgePanelFramePinsToRightEdge() {
+    func testEdgePanelFramePinsToRightEdgeAndCentersVertically() {
         let screen = CGRect(x: 0, y: 0, width: 1_440, height: 900)
         let frame = DynamicIslandPlacementPolicy.edgePanelFrame(
             screenFrame: screen,
             visibleBottom: 40,
             panelWidth: 536
         )
+        let expectedHeight = DynamicIslandLayoutPolicy.panelHeight(screenTop: 900, visibleBottom: 40)
         XCTAssertEqual(frame.maxX, screen.maxX)
-        XCTAssertEqual(frame.maxY, screen.maxY)
         XCTAssertEqual(frame.width, 536)
-        XCTAssertEqual(frame.height, DynamicIslandLayoutPolicy.panelHeight(screenTop: 900, visibleBottom: 40))
+        XCTAssertEqual(frame.height, expectedHeight)
+        // On a tall display the capped panel is vertically centered in the
+        // usable strip, so mid-bezel chrome sits at true screen midY.
+        let availableMidY = 40 + (900 - 40) / 2
+        XCTAssertEqual(frame.midY, availableMidY, accuracy: 0.5)
+        XCTAssertLessThan(frame.maxY, screen.maxY)
+        XCTAssertGreaterThan(frame.minY, 40 - 0.5)
+    }
+
+    func testEdgePanelFrameFillsShortDisplays() {
+        let screen = CGRect(x: 0, y: 0, width: 1_280, height: 720)
+        let frame = DynamicIslandPlacementPolicy.edgePanelFrame(
+            screenFrame: screen,
+            visibleBottom: 40,
+            panelWidth: 536
+        )
+        // Available height 680 < max panel — panel fills the strip.
+        XCTAssertEqual(frame.minY, 40, accuracy: 0.5)
+        XCTAssertEqual(frame.maxY, screen.maxY, accuracy: 0.5)
+        XCTAssertEqual(frame.maxX, screen.maxX)
     }
 
     func testEdgeHitRectIsVerticallyCenteredTrailingPill() {
