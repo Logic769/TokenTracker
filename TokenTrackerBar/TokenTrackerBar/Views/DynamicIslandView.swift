@@ -107,11 +107,11 @@ struct DynamicIslandView: View {
 
         let content = VStack(spacing: 0) {
             if !expanded {
-                if isEdge {
-                    edgeCollapsedPill
+                if DynamicIslandPlacementPolicy.showsCollapsedMetrics(for: state.placement) {
+                    collapsedRow
                         .transition(.opacity)
                 } else {
-                    collapsedRow
+                    edgeCollapsedPill
                         .transition(.opacity)
                 }
             } else {

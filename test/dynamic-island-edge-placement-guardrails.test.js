@@ -52,7 +52,16 @@ test("controller reloads placement and pins edge panel to the right", () => {
 test("view uses a fixed edge pill without collapsed metric wings", () => {
   assert.match(viewSource, /edgeCollapsedPill/);
   assert.match(viewSource, /Capsule\(\)/);
+  assert.match(viewSource, /showsCollapsedMetrics\(for: state\.placement\)/);
   assert.match(viewSource, /state\.placement == \.edge/);
+});
+
+test("reloadPlacement refreshes fullscreen presence for the new screen", () => {
+  assert.match(
+    controllerSource,
+    /func reloadPlacement\(\)[\s\S]*?fullscreenActive = readFullscreenActive\(\)[\s\S]*?applyPresence\(\)/,
+  );
+  assert.match(controllerSource, /func presenceScreen\(\) -> NSScreen\?/);
 });
 
 test("native bridge exposes and accepts dynamicIslandPlacement", () => {

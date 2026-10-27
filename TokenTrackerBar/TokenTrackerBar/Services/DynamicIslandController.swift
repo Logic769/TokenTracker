@@ -264,8 +264,19 @@ final class DynamicIslandController: NSObject {
             collapseWorkItem?.cancel()
             state.isExpanded = false
         }
-        repositionPanel()
-        panel?.updateHitRegion()
+        // Placement can change which screen we care about (notched vs main),
+        // so refresh fullscreen presence before / while re-pinning — otherwise
+        // a stale fullscreenActive from the previous screen keeps the new
+        // surface hidden until some unrelated environment notification.
+        cancelFullscreenSettleRetries()
+        fullscreenActive = readFullscreenActive()
+        applyPresence()
+        if shouldShowPanel {
+            repositionPanel()
+            panel?.updateHitRegion()
+        } else if fullscreenActive {
+            armFullscreenSettleRetries()
+        }
         state.settingsTick += 1
     }
 
@@ -728,9 +739,20 @@ final class DynamicIslandController: NSObject {
         "Control Center", "Notification Centre", "Notification Center",
     ]
 
+    /// Screen used for fullscreen coverage checks. Prefer the panel's current
+    /// screen so a focus-driven `NSScreen.main` change cannot suppress an
+    /// already-visible surface on another display; fall back to the placement
+    /// target when the panel is not up yet.
+    private func presenceScreen() -> NSScreen? {
+        if let panel, panel.isVisible, let screen = panel.screen {
+            return screen
+        }
+        return targetScreen()
+    }
+
     /// `nil` when the window list is unavailable so the caller can fall back.
     private func islandScreenHasFullscreenWindow() -> Bool? {
-        guard let screen = targetScreen(),
+        guard let screen = presenceScreen(),
               let primary = NSScreen.screens.first
         else { return false }
         let cgOptions = CGWindowListOption(arrayLiteral: .optionOnScreenOnly, .excludeDesktopElements)
