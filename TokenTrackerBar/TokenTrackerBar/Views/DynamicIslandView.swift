@@ -80,8 +80,9 @@ struct DynamicIslandView: View {
         let islandWidth = expanded
             ? max(DynamicIslandGeometry.expandedWidth, geo.collapsedWidth)
             : geo.collapsedWidth
-        // Edge collapsed is a plain capsule flush to the bezel — no notch
-        // shoulder flare. Island mode keeps the native notch silhouette.
+        // Island mode keeps the native notch silhouette. Edge mode uses the
+        // CodeNotch-inspired bezel-welded flare (`EdgeNotchShape`) for both
+        // collapsed and expanded so the spring morphs one concrete shape.
         let shoulderRadius: CGFloat = {
             if isEdge { return 0 }
             return expanded ? CGFloat(8) : min(6, geo.collapsedHeight / 4)
@@ -95,15 +96,16 @@ struct DynamicIslandView: View {
             isDismissing: state.isVisibilityDismissing
         )
         let bottomRadius: CGFloat = {
-            if isEdge && !expanded {
-                return min(islandWidth, geo.collapsedHeight) / 2
-            }
+            if isEdge { return 0 }
             return expanded ? 22 : min(12, geo.collapsedHeight / 2.5)
         }()
-        let shape = IslandRoundedRectangle(
+        let islandShape = IslandRoundedRectangle(
             topShoulderRadius: shoulderRadius,
             bottomRadius: bottomRadius
         )
+        let edgeCurl = DynamicIslandPlacementPolicy.edgeCurlRadius(isExpanded: expanded)
+        let edgeCorner = DynamicIslandPlacementPolicy.edgeCornerRadius(isExpanded: expanded)
+        let edgeShape = EdgeNotchShape(curlRadius: edgeCurl, cornerRadius: edgeCorner)
 
         let content = VStack(spacing: 0) {
             if !expanded {
@@ -130,30 +132,72 @@ struct DynamicIslandView: View {
         .padding(.horizontal, shoulderRadius)
         .fixedSize(horizontal: false, vertical: expanded)
 
-        // Edge collapsed uses a plain capsule (CodeNotch-style). Island mode
-        // keeps the notch silhouette; expanded edge reuses the same rounded card.
+        // One concrete chrome per placement — never swap Capsule ↔ rounded
+        // rect through AnyView, or the spring has nothing continuous to morph.
         let chrome: AnyView = {
-            if isEdge && !expanded {
+            if isEdge {
                 return AnyView(
                     content
-                        .clipShape(Capsule())
+                        .clipShape(edgeShape)
                         .background(
-                            Capsule().fill(Color.black)
+                            edgeShape.fill(Color.black)
+                                .shadow(
+                                    color: .black.opacity(expanded ? 0.28 : 0.18),
+                                    radius: expanded ? 14 : 6,
+                                    x: expanded ? -4 : -2,
+                                    y: 0
+                                )
                         )
+                        .overlay(
+                            edgeShape
+                                .stroke(
+                                    LinearGradient(
+                                        colors: [
+                                            Color.white.opacity(expanded ? 0.16 : 0.22),
+                                            Color.white.opacity(0.04),
+                                            Color.white.opacity(expanded ? 0.10 : 0.08)
+                                        ],
+                                        startPoint: .topLeading,
+                                        endPoint: .bottomTrailing
+                                    ),
+                                    lineWidth: expanded ? 0.5 : 0.6
+                                )
+                        )
+                        // Soft inward specular so the thin resting pill reads as
+                        // moulded glass, not a flat black stick.
+                        .overlay(alignment: .leading) {
+                            if !expanded {
+                                Capsule()
+                                    .fill(
+                                        LinearGradient(
+                                            colors: [
+                                                Color.white.opacity(0.22),
+                                                Color.white.opacity(0.0)
+                                            ],
+                                            startPoint: .leading,
+                                            endPoint: .trailing
+                                        )
+                                    )
+                                    .frame(width: 2)
+                                    .padding(.vertical, 14)
+                                    .padding(.leading, 2)
+                                    .allowsHitTesting(false)
+                            }
+                        }
                 )
             }
             return AnyView(
                 content
-                    .clipShape(shape)
+                    .clipShape(islandShape)
                     .background(
-                        shape.fill(Color.black)
+                        islandShape.fill(Color.black)
                             .shadow(color: .black.opacity(expanded ? 0.25 : 0), radius: expanded ? 10 : 0, x: 0, y: expanded ? 5 : 0)
                             .shadow(color: .black.opacity(expanded ? 0.15 : 0), radius: expanded ? 3 : 0, x: 0, y: expanded ? 1 : 0)
                     )
                     .overlay(
                         Group {
                             if expanded {
-                                shape
+                                islandShape
                                     .stroke(
                                         LinearGradient(
                                             colors: [
@@ -189,28 +233,32 @@ struct DynamicIslandView: View {
             Rectangle()
                 .frame(width: revealWidth)
         }
-        // Island: top-center. Edge: top-trailing so the pill / card hugs the
-        // right bezel and expands leftward.
+        // Island: top-center. Edge: trailing (vertically centered) so the
+        // resting pill sits mid-bezel like CodeNotch and expands in place.
         .frame(
             maxWidth: .infinity,
             maxHeight: .infinity,
-            alignment: isEdge ? .topTrailing : .top
+            alignment: isEdge ? .trailing : .top
         )
     }
 
-    /// Fixed right-edge collapsed chrome: no token/spend text (CodeNotch-style).
+    /// Fixed right-edge collapsed chrome: no token/spend text. Three soft
+    /// orb hints echo CodeNotch's resting language without copying its goo.
     private var edgeCollapsedPill: some View {
         let geo = state.geometry
         return ZStack {
-            // A quiet brand mark so the pill reads as intentional chrome, not
-            // an empty sliver. Metric strings stay out of the collapsed state.
-            Image(systemName: "circle.hexagongrid.fill")
-                .font(.system(size: 8, weight: .semibold))
-                .foregroundStyle(Color.white.opacity(0.75))
-                .rotationEffect(.degrees(90))
+            VStack(spacing: 6) {
+                ForEach(0..<3, id: \.self) { index in
+                    Circle()
+                        .fill(Color.white.opacity(index == 1 ? 0.55 : 0.28))
+                        .frame(width: 3.5, height: 3.5)
+                }
+            }
+            .accessibilityHidden(true)
         }
         .frame(width: geo.collapsedWidth, height: geo.collapsedHeight)
         .contentShape(Rectangle())
+        .accessibilityLabel(Strings.menuPlacementEdge)
     }
 
     // MARK: - Collapsed wings

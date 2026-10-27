@@ -460,10 +460,17 @@ final class DynamicIslandController: NSObject {
 
     private func expand() {
         guard !state.isExpanded else { return }
-        // Panel frame stays put — only the black shape springs open from the
-        // top. Resizing the window mid-animation was what opened the seam.
-        if NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
+        // Panel frame stays put — only the black shape springs open.
+        // Resizing the window mid-animation was what opened the seam.
+        // Edge uses CodeNotch-like liquid unfold (0.62/0.72); island keeps
+        // the snappier existing spring so notch wings do not feel sluggish.
+        let reduce = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        if reduce {
             state.isExpanded = true
+        } else if state.placement == .edge {
+            withAnimation(EdgeNotchMotion.unfold) {
+                state.isExpanded = true
+            }
         } else {
             withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
                 state.isExpanded = true
@@ -474,8 +481,13 @@ final class DynamicIslandController: NSObject {
 
     private func collapse() {
         guard state.isExpanded else { return }
-        if NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
+        let reduce = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        if reduce {
             state.isExpanded = false
+        } else if state.placement == .edge {
+            withAnimation(EdgeNotchMotion.unfold) {
+                state.isExpanded = false
+            }
         } else {
             withAnimation(.spring(response: 0.3, dampingFraction: 0.9)) {
                 state.isExpanded = false
@@ -485,9 +497,10 @@ final class DynamicIslandController: NSObject {
         // continue its spring animation visually, but its transparent former
         // bounds must become click-through and hover-inert at once.
         panel?.updateHitRegion()
-        // Re-assert after the spring settles in case measured geometry changed
-        // during the transition.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in
+        // Edge unfold settles slower (~0.6s) than the island spring; wait
+        // longer before re-asserting the collapsed hit region.
+        let settle: TimeInterval = state.placement == .edge ? 0.7 : 0.4
+        DispatchQueue.main.asyncAfter(deadline: .now() + settle) { [weak self] in
             guard let self, !self.state.isExpanded else { return }
             self.panel?.updateHitRegion()
         }

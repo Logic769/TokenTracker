@@ -28,14 +28,30 @@ enum DynamicIslandPlacement: String, CaseIterable, Equatable {
 enum DynamicIslandPlacementPolicy {
     static let defaultsKey = "DynamicIslandPlacement"
 
+    // MARK: - Collapsed pill (CodeNotch resting proportions)
+    //
+    // CodeNotch: Design.scale 44/117 → pillWidth ≈ 9.8 pt, pillHeight ≈ 79 pt.
+    // We stay a hair thicker so a tiny brand glyph / orb hint stays readable.
+
     /// Depth of the collapsed right-edge pill into the screen (pt).
-    /// Inspired by CodeNotch's resting pill (~9.8 pt); slightly thicker so a
-    /// small brand glyph stays readable.
-    static let edgePillDepth: CGFloat = 12
+    static let edgePillDepth: CGFloat = 10
     /// Length of the collapsed right-edge pill along the screen edge (pt).
     static let edgePillLength: CGFloat = 80
-    /// Extra wake depth beyond the visible pill so hover is forgiving.
-    static let edgeHotZoneDepth: CGFloat = 28
+    /// Extra wake depth beyond the visible pill so hover is forgiving
+    /// (CodeNotch `pillHotZone` is deliberately larger than the resting body).
+    static let edgeHotZoneDepth: CGFloat = 36
+    /// Extra depth the resting pill gains on hover approach before full expand.
+    static let edgeWakeBoost: CGFloat = 4
+
+    // MARK: - Shape radii (fed into `EdgeNotchShape`)
+
+    /// Ideal curl / corner when the shape is deep enough; thin resting pills
+    /// clamp these in `EdgeNotchShape.path` the same way CodeNotch does.
+    static let edgeCurlIdeal: CGFloat = 38
+    static let edgeCornerIdeal: CGFloat = 14
+    /// Expanded card uses a smaller bezel fillet + island-matching corner.
+    static let edgeCurlExpanded: CGFloat = 14
+    static let edgeCornerExpanded: CGFloat = 22
 
     static func placement(from defaults: UserDefaults = .standard) -> DynamicIslandPlacement {
         DynamicIslandPlacement.fromBridge(defaults.string(forKey: defaultsKey))
@@ -67,6 +83,16 @@ enum DynamicIslandPlacementPolicy {
         CGSize(width: edgePillDepth, height: edgePillLength)
     }
 
+    /// Curl radius for the current edge chrome state.
+    static func edgeCurlRadius(isExpanded: Bool) -> CGFloat {
+        isExpanded ? edgeCurlExpanded : edgeCurlIdeal
+    }
+
+    /// Inward corner radius for the current edge chrome state.
+    static func edgeCornerRadius(isExpanded: Bool) -> CGFloat {
+        isExpanded ? edgeCornerExpanded : edgeCornerIdeal
+    }
+
     /// Panel frame for edge mode: same generous size as the island panel, but
     /// pinned to the right edge of the screen so expand grows leftward.
     static func edgePanelFrame(
@@ -88,8 +114,9 @@ enum DynamicIslandPlacementPolicy {
     }
 
     /// Interactive rect of the black shape in panel coordinates (origin
-    /// bottom-left). Collapsed: trailing vertical pill near the top.
-    /// Expanded: trailing card matching the measured island height.
+    /// bottom-left). Collapsed: vertically centered trailing pill (CodeNotch
+    /// resting position). Expanded: trailing card, also vertically centered so
+    /// the spring morph does not leap from mid-edge to the menu bar.
     static func edgeHitRect(
         panelSize: CGSize,
         isExpanded: Bool,
@@ -108,7 +135,7 @@ enum DynamicIslandPlacementPolicy {
             height = min(collapsedSize.height, panelSize.height)
         }
         let x = panelSize.width - width
-        let y = panelSize.height - height
+        let y = (panelSize.height - height) / 2
         return CGRect(x: x, y: y, width: width, height: height)
     }
 
