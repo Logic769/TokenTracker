@@ -46,8 +46,10 @@ enum DynamicIslandPlacementPolicy {
 
     // MARK: - Shape radii (fed into `EdgeNotchShape`)
 
-    /// Ideal curl / corner when the shape is deep enough; thin resting pills
-    /// clamp these in `EdgeNotchShape.path` the same way CodeNotch does.
+    /// Ideal curl / corner when the shape is deep enough. On the thin resting
+    /// pill, `EdgeNotchShape` claims corner → bezelHidden → curl *depth*, then
+    /// may stretch the along-edge flare into a gentle ellipse (`fluidTurn`) so
+    /// the bezel weld is not a stiff 4 pt circular crook.
     static let edgeCurlIdeal: CGFloat = 38
     static let edgeCornerIdeal: CGFloat = 14
     /// Expanded card uses a smaller bezel fillet + island-matching corner.

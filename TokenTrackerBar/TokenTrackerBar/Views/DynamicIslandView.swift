@@ -146,34 +146,41 @@ struct DynamicIslandView: View {
         // rect through AnyView, or the spring has nothing continuous to morph.
         let chrome: AnyView = {
             if isEdge {
+                // Collapsed chrome: no drop shadow and no stroke. Shadow + AA
+                // stroke were filling the concave bezel-flare crooks with dark
+                // patches ("两片发暗") outside the opaque body. Expanded keeps
+                // a light rim + soft inward shadow; wake only deepens the body
+                // and brightens the quiet dots (see edgeCollapsedPill).
                 return AnyView(
                     content
                         .clipShape(edgeShape)
                         .background(
                             edgeShape.fill(Color.black)
                                 .shadow(
-                                    color: .black.opacity(expanded ? 0.28 : (edgeWaking ? 0.26 : 0.18)),
-                                    radius: expanded ? 14 : (edgeWaking ? 10 : 6),
-                                    x: expanded ? -4 : (edgeWaking ? -3 : -2),
+                                    color: .black.opacity(expanded ? 0.28 : 0),
+                                    radius: expanded ? 14 : 0,
+                                    x: expanded ? -4 : 0,
                                     y: 0
                                 )
                         )
                         .overlay(
-                            edgeShape
-                                .stroke(
-                                    LinearGradient(
-                                        colors: [
-                                            Color.white.opacity(expanded ? 0.16 : (edgeWaking ? 0.18 : 0.10)),
-                                            Color.white.opacity(edgeWaking && !expanded ? 0.06 : 0.04),
-                                            Color.white.opacity(expanded ? 0.10 : (edgeWaking ? 0.10 : 0.05))
-                                        ],
-                                        startPoint: .topLeading,
-                                        endPoint: .bottomTrailing
-                                    ),
-                                    // One soft rim only — no vertical grip hairline.
-                                    // Wake brightens the rim slightly; rest stays quiet.
-                                    lineWidth: expanded ? 0.5 : (edgeWaking ? 0.55 : 0.4)
-                                )
+                            Group {
+                                if expanded {
+                                    edgeShape
+                                        .stroke(
+                                            LinearGradient(
+                                                colors: [
+                                                    Color.white.opacity(0.16),
+                                                    Color.white.opacity(0.04),
+                                                    Color.white.opacity(0.10)
+                                                ],
+                                                startPoint: .topLeading,
+                                                endPoint: .bottomTrailing
+                                            ),
+                                            lineWidth: 0.5
+                                        )
+                                }
+                            }
                         )
                 )
             }
@@ -234,9 +241,10 @@ struct DynamicIslandView: View {
     }
 
     /// Fixed right-edge collapsed chrome: quiet 3-dot stack on a solid black
-    /// `EdgeNotchShape` body. No vertical specular hairline — one soft rim on
-    /// the shape is enough. Wake (via `state.isEdgeWaking`) brightens the dots
-    /// and gently scales them before unfold.
+    /// `EdgeNotchShape` body. No vertical specular hairline and no collapsed
+    /// rim/shadow (those dirtied the bezel-flare crooks). Wake (via
+    /// `state.isEdgeWaking`) brightens the dots and gently scales them before
+    /// unfold.
     private var edgeCollapsedPill: some View {
         let geo = state.geometry
         let waking = state.isEdgeWaking

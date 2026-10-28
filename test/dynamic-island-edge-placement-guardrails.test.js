@@ -83,8 +83,22 @@ test("edge shape + motion files exist", () => {
   assert.match(shape, /enum EdgeNotchMotion/);
   assert.match(shape, /response: 0\.62/);
   assert.match(shape, /dampingFraction: 0\.72/);
+  assert.match(shape, /fluidTurn/);
+  assert.match(shape, /filletRamp/);
   assert.match(policySource, /edgeCurlRadius/);
   assert.match(policySource, /edgeCornerRadius/);
+});
+
+test("collapsed edge chrome has no drop shadow or stroke AA dirt", () => {
+  // Shadow/stroke in the concave bezel-flare crooks caused the "两片发暗"
+  // patches. Collapsed must gate both to expanded-only.
+  assert.match(viewSource, /opacity\(expanded \? 0\.28 : 0\)/);
+  assert.match(viewSource, /radius: expanded \? 14 : 0/);
+  assert.match(
+    viewSource,
+    /if expanded \{[\s\S]*?edgeShape[\s\S]*?\.stroke\(/,
+    "expanded edge may keep a light rim; collapsed must not stroke the flare",
+  );
 });
 
 test("reloadPlacement refreshes fullscreen presence for the new screen", () => {
