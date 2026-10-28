@@ -805,6 +805,7 @@ test("a slow-but-successful account read finishes in the background and ends the
           const err = new Error("The operation was aborted.");
           err.name = "AbortError";
           reject(err);
+          finished(err);
         };
         opts?.signal?.addEventListener("abort", onAbort);
         probeGate.then(() => {
@@ -825,7 +826,7 @@ test("a slow-but-successful account read finishes in the background and ends the
     assert.equal(during._headers["x-tokentracker-account-view"], "0");
 
     releaseProbe();
-    await finishedPromise;
+    assert.ifError(await finishedPromise);
     await new Promise((resolve) => setTimeout(resolve, 5));
     const after = await call(handler, { endpoint: HEATMAP_ENDPOINT });
     assert.equal(after._headers["x-tokentracker-account-view"], "1",
