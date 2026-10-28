@@ -696,8 +696,10 @@ private struct EdgePanelScrollEdgeChrome: ViewModifier {
 
     func body(content: Content) -> some View {
         if enabled {
-            if #available(macOS 15.0, *) {
-                content.scrollEdgeEffectStyle(.hard, for: .all)
+            if #available(macOS 26.0, *) {
+                // Soft scroll-edge fades look like translucent black masks on
+                // the solid black edge card; prefer the hard chrome.
+                content.scrollEdgeEffectStyle(.hard, for: .vertical)
             } else {
                 content
             }
