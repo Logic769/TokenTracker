@@ -46,13 +46,13 @@ enum DynamicIslandPlacementPolicy {
 
     // MARK: - Shape radii (fed into `EdgeNotchShape`)
 
-    /// Bezel-flare curl is unused: the edge pill is a right-flush rounded rect
-    /// (square into the screen edge, round only on the inward side). Kept at 0
-    /// so call sites / guardrails can assert curl is off.
-    static let edgeCurlIdeal: CGFloat = 0
+    /// Ideal bezel fillet when the shape is deep enough. Thin resting pills
+    /// clamp this in `EdgeNotchShape.path` to an isotropic ~3–4 pt weld
+    /// (never stretched along-edge ears).
+    static let edgeCurlIdeal: CGFloat = 8
     static let edgeCornerIdeal: CGFloat = 14
-    /// Expanded card: still no bezel flare; island-matching inward corner.
-    static let edgeCurlExpanded: CGFloat = 0
+    /// Expanded card: larger soft fillet + island-matching inward corner.
+    static let edgeCurlExpanded: CGFloat = 18
     static let edgeCornerExpanded: CGFloat = 22
 
     static func placement(from defaults: UserDefaults = .standard) -> DynamicIslandPlacement {
@@ -85,7 +85,7 @@ enum DynamicIslandPlacementPolicy {
         CGSize(width: edgePillDepth, height: edgePillLength)
     }
 
-    /// Curl radius for the current edge chrome state. Always 0 — flare removed.
+    /// Curl radius for the current edge chrome state (isotropic bezel fillet).
     static func edgeCurlRadius(isExpanded: Bool) -> CGFloat {
         isExpanded ? edgeCurlExpanded : edgeCurlIdeal
     }
@@ -95,14 +95,57 @@ enum DynamicIslandPlacementPolicy {
         isExpanded ? edgeCornerExpanded : edgeCornerIdeal
     }
 
+    /// Horizontal breathing room inside the expanded edge card so labels clear
+    /// the inward corners / fillet. Shape silhouette stays organic; only the
+    /// *content* is padded. Combined at the call site with `curlRadius + 4`.
+    static let edgeExpandedContentInset: CGFloat = 16
+    /// Top clearance so the header is not cramped under the inward corner.
+    /// Larger than bottom — screenshots showed title glued to the rim.
+    static let edgeExpandedContentInsetTop: CGFloat = 28
+    /// Bottom clearance under the footer. Kept tight so bottom-left does not
+    /// read as a vacant black cavern under "Open Dashboard".
+    static let edgeExpandedContentInsetBottom: CGFloat = 8
+
+    /// UserDefaults key for the persisted mid-edge vertical offset (points,
+    /// AppKit: positive = up from the default vertically-centered rest).
+    static let edgeVerticalOffsetKey = "DynamicIslandEdgeVerticalOffset"
+
+    static func edgeVerticalOffset(from defaults: UserDefaults = .standard) -> CGFloat {
+        CGFloat(defaults.double(forKey: edgeVerticalOffsetKey))
+    }
+
+    static func writeEdgeVerticalOffset(_ offset: CGFloat, to defaults: UserDefaults = .standard) {
+        defaults.set(Double(offset), forKey: edgeVerticalOffsetKey)
+    }
+
+    /// Clamp an offset so the edge panel stays inside the usable strip
+    /// (above Dock / below menu bar reserve implied by `visibleBottom`…
+    /// `screenFrame.maxY`).
+    static func clampEdgeVerticalOffset(
+        _ offset: CGFloat,
+        screenFrame: CGRect,
+        visibleBottom: CGFloat,
+        panelHeight: CGFloat
+    ) -> CGFloat {
+        let available = max(0, screenFrame.maxY - visibleBottom)
+        let height = min(panelHeight, available)
+        let centeredY = visibleBottom + (available - height) / 2
+        let minY = visibleBottom
+        let maxY = screenFrame.maxY - height
+        let rawY = centeredY + offset
+        let clampedY = min(max(rawY, minY), max(minY, maxY))
+        return clampedY - centeredY
+    }
+
     /// Panel frame for edge mode: same generous size as the island panel, but
-    /// pinned to the right edge and vertically centered in the usable desktop
-    /// strip so mid-bezel chrome lands at true screen midY (not mid of a
-    /// top-pinned strip on tall displays).
+    /// pinned to the right edge. Default rest is vertically centered in the
+    /// usable desktop strip; `verticalOffset` (persisted) shifts that rest
+    /// along the bezel within safe bounds.
     static func edgePanelFrame(
         screenFrame: CGRect,
         visibleBottom: CGFloat,
-        panelWidth: CGFloat
+        panelWidth: CGFloat,
+        verticalOffset: CGFloat = 0
     ) -> CGRect {
         let panelHeight = DynamicIslandLayoutPolicy.panelHeight(
             screenTop: screenFrame.maxY,
@@ -111,7 +154,14 @@ enum DynamicIslandPlacementPolicy {
         let width = max(panelWidth, DynamicIslandLayoutPolicy.expandedWidth)
         let available = max(0, screenFrame.maxY - visibleBottom)
         let height = min(panelHeight, available)
-        let y = visibleBottom + (available - height) / 2
+        let centeredY = visibleBottom + (available - height) / 2
+        let clamped = clampEdgeVerticalOffset(
+            verticalOffset,
+            screenFrame: screenFrame,
+            visibleBottom: visibleBottom,
+            panelHeight: panelHeight
+        )
+        let y = centeredY + clamped
         return CGRect(
             x: screenFrame.maxX - width,
             y: y,

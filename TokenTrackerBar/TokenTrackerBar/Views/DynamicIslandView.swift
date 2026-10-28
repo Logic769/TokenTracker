@@ -83,9 +83,9 @@ struct DynamicIslandView: View {
         let islandWidth = expanded
             ? max(DynamicIslandGeometry.expandedWidth, geo.collapsedWidth)
             : geo.collapsedWidth + wakeBoost
-        // Island mode keeps the native notch silhouette. Edge mode uses a
-        // right-flush rounded rect (`EdgeNotchShape`) for both collapsed and
-        // expanded so the spring morphs one concrete shape.
+        // Island mode keeps the native notch silhouette. Edge mode uses
+        // `EdgeNotchShape` (gentle isotropic bezel fillet + inward corners)
+        // for both collapsed and expanded so the spring morphs one shape.
         let shoulderRadius: CGFloat = {
             if isEdge { return 0 }
             return expanded ? CGFloat(8) : min(6, geo.collapsedHeight / 4)
@@ -106,11 +106,30 @@ struct DynamicIslandView: View {
             topShoulderRadius: shoulderRadius,
             bottomRadius: bottomRadius
         )
+        let edgeCurl = DynamicIslandPlacementPolicy.edgeCurlRadius(isExpanded: expanded)
         let edgeCorner = DynamicIslandPlacementPolicy.edgeCornerRadius(isExpanded: expanded)
-        let edgeShape = EdgeNotchShape(cornerRadius: edgeCorner)
+        let edgeShape = EdgeNotchShape(curlRadius: edgeCurl, cornerRadius: edgeCorner)
 
-        // Flush square bezel join — no flare crook, so no vertical curl inset.
-        let edgeContentInset: CGFloat = 0
+        // Fillet + rim clearance for expanded edge content only. Collapsed
+        // stays tight so the 3-dot pill does not grow with the curl pad.
+        // Inset is applied *inside* the fixed islandWidth so the reveal mask,
+        // hit rect, and EdgeNotchShape stay aligned — padding outside the
+        // frame previously grew chrome past revealWidth and chopped the
+        // inward (leading) side ("Plan" → "Ian").
+        // Horizontal must clear curl/corners; vertical is asymmetric — more
+        // top breathing room, tight bottom so the footer is not floating.
+        let edgeContentInsetX: CGFloat = (isEdge && expanded)
+            ? max(
+                DynamicIslandPlacementPolicy.edgeExpandedContentInset,
+                edgeCurl + 4
+            )
+            : 0
+        let edgeContentInsetTop: CGFloat = (isEdge && expanded)
+            ? DynamicIslandPlacementPolicy.edgeExpandedContentInsetTop
+            : 0
+        let edgeContentInsetBottom: CGFloat = (isEdge && expanded)
+            ? DynamicIslandPlacementPolicy.edgeExpandedContentInsetBottom
+            : 0
         let content = VStack(spacing: 0) {
             if !expanded {
                 if DynamicIslandPlacementPolicy.showsCollapsedMetrics(for: state.placement) {
@@ -127,13 +146,19 @@ struct DynamicIslandView: View {
                     .transition(.opacity)
             }
         }
+        // Edge expanded: pad first (asymmetric vertical), then lock outer
+        // width so content shrinks into the shape instead of pushing past
+        // the trailing reveal mask.
+        .padding(.top, edgeContentInsetTop)
+        .padding(.bottom, edgeContentInsetBottom)
+        .padding(.horizontal, edgeContentInsetX)
         // Width is always explicit. Height: nil when expanded lets the VStack
         // size naturally to its content; explicit when collapsed.
         .frame(width: islandWidth, height: expanded ? nil : geo.collapsedHeight, alignment: .top)
-        .padding(.vertical, edgeContentInset)
         // The native notch shoulder flares outward at the screen edge, then
         // curves inward to the content body. Keep that flare outside the
-        // content width so it never squeezes either metric wing.
+        // content width so it never squeezes either metric wing. Edge mode
+        // has no shoulders (inset above handles bezel clearance).
         .padding(.horizontal, shoulderRadius)
         .fixedSize(horizontal: false, vertical: expanded)
 
@@ -655,11 +680,11 @@ struct DynamicIslandView: View {
                 .opacity(0.4)
                 .padding(.vertical, 2)
 
-            FooterView(horizontalPadding: 4, verticalPadding: 2)
+            FooterView(horizontalPadding: 4, verticalPadding: state.placement == .edge ? 0 : 2)
         }
         .padding(.horizontal, 14)
-        .padding(.top, 10)
-        .padding(.bottom, 10)
+        .padding(.top, state.placement == .edge ? 8 : 10)
+        .padding(.bottom, state.placement == .edge ? 4 : 10)
     }
 }
 

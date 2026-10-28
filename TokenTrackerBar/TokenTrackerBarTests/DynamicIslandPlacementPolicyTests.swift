@@ -45,18 +45,73 @@ final class DynamicIslandPlacementPolicyTests: XCTestCase {
         XCTAssertEqual(size.height, 80)
     }
 
-    func testEdgeShapeRadiiFlushBezelNoCurl() {
-        // Bezel flare removed — curl is unused at rest and expanded.
-        XCTAssertEqual(DynamicIslandPlacementPolicy.edgeCurlRadius(isExpanded: false), 0)
-        XCTAssertEqual(DynamicIslandPlacementPolicy.edgeCurlRadius(isExpanded: true), 0)
-        XCTAssertEqual(DynamicIslandPlacementPolicy.edgeCurlIdeal, 0)
-        XCTAssertEqual(DynamicIslandPlacementPolicy.edgeCurlExpanded, 0)
+    func testEdgeShapeRadiiGentleIsotropicCurl() {
+        // Middle path: modest isotropic bezel fillet (not zero flush, not
+        // stretched along-edge ears). Thin pills clamp further in the shape.
+        XCTAssertEqual(DynamicIslandPlacementPolicy.edgeCurlIdeal, 8)
+        XCTAssertEqual(DynamicIslandPlacementPolicy.edgeCurlExpanded, 18)
+        XCTAssertEqual(DynamicIslandPlacementPolicy.edgeCurlRadius(isExpanded: false), 8)
+        XCTAssertEqual(DynamicIslandPlacementPolicy.edgeCurlRadius(isExpanded: true), 18)
+        XCTAssertLessThan(
+            DynamicIslandPlacementPolicy.edgeCurlIdeal,
+            DynamicIslandPlacementPolicy.edgeCurlExpanded
+        )
         XCTAssertLessThan(
             DynamicIslandPlacementPolicy.edgeCornerRadius(isExpanded: false),
             DynamicIslandPlacementPolicy.edgeCornerRadius(isExpanded: true)
         )
         XCTAssertEqual(DynamicIslandPlacementPolicy.edgeCornerRadius(isExpanded: true), 22)
         XCTAssertEqual(DynamicIslandPlacementPolicy.edgeCornerRadius(isExpanded: false), 14)
+        XCTAssertEqual(DynamicIslandPlacementPolicy.edgeExpandedContentInset, 16)
+        XCTAssertEqual(DynamicIslandPlacementPolicy.edgeExpandedContentInsetTop, 28)
+        XCTAssertEqual(DynamicIslandPlacementPolicy.edgeExpandedContentInsetBottom, 8)
+        // Top must stay roomier than bottom — user-visible imbalance otherwise.
+        XCTAssertGreaterThan(
+            DynamicIslandPlacementPolicy.edgeExpandedContentInsetTop,
+            DynamicIslandPlacementPolicy.edgeExpandedContentInsetBottom
+        )
+    }
+
+    func testEdgeVerticalOffsetPersistsAndClamps() throws {
+        let suiteName = "DynamicIslandPlacementPolicyTests.offset.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        XCTAssertEqual(DynamicIslandPlacementPolicy.edgeVerticalOffset(from: defaults), 0)
+        DynamicIslandPlacementPolicy.writeEdgeVerticalOffset(CGFloat(120), to: defaults)
+        XCTAssertEqual(DynamicIslandPlacementPolicy.edgeVerticalOffset(from: defaults), CGFloat(120), accuracy: 0.01)
+
+        let screen = CGRect(x: 0, y: 0, width: 1_440, height: 900)
+        let panelH: CGFloat = 600
+        // Usable strip 860; centered panel leaves ±130 of travel.
+        let clampedUp = DynamicIslandPlacementPolicy.clampEdgeVerticalOffset(
+            CGFloat(5_000),
+            screenFrame: screen,
+            visibleBottom: 40,
+            panelHeight: panelH
+        )
+        let clampedDown = DynamicIslandPlacementPolicy.clampEdgeVerticalOffset(
+            -CGFloat(5_000),
+            screenFrame: screen,
+            visibleBottom: 40,
+            panelHeight: panelH
+        )
+        XCTAssertLessThan(clampedUp, CGFloat(5_000))
+        XCTAssertGreaterThan(clampedDown, -CGFloat(5_000))
+        let frameUp = DynamicIslandPlacementPolicy.edgePanelFrame(
+            screenFrame: screen,
+            visibleBottom: 40,
+            panelWidth: 536,
+            verticalOffset: clampedUp
+        )
+        XCTAssertEqual(frameUp.maxY, screen.maxY, accuracy: 0.5)
+        let frameDown = DynamicIslandPlacementPolicy.edgePanelFrame(
+            screenFrame: screen,
+            visibleBottom: 40,
+            panelWidth: 536,
+            verticalOffset: clampedDown
+        )
+        XCTAssertEqual(frameDown.minY, CGFloat(40), accuracy: 0.5)
     }
 
     func testEdgePanelFramePinsToRightEdgeAndCentersVertically() {
@@ -72,7 +127,7 @@ final class DynamicIslandPlacementPolicyTests: XCTestCase {
         XCTAssertEqual(frame.height, expectedHeight)
         // On a tall display the capped panel is vertically centered in the
         // usable strip, so mid-bezel chrome sits at true screen midY.
-        let availableMidY = 40 + (900 - 40) / 2
+        let availableMidY: CGFloat = 40 + (900 - 40) / 2
         XCTAssertEqual(frame.midY, availableMidY, accuracy: 0.5)
         XCTAssertLessThan(frame.maxY, screen.maxY)
         XCTAssertGreaterThan(frame.minY, 40 - 0.5)
@@ -86,7 +141,7 @@ final class DynamicIslandPlacementPolicyTests: XCTestCase {
             panelWidth: 536
         )
         // Available height 680 < max panel — panel fills the strip.
-        XCTAssertEqual(frame.minY, 40, accuracy: 0.5)
+        XCTAssertEqual(frame.minY, CGFloat(40), accuracy: 0.5)
         XCTAssertEqual(frame.maxY, screen.maxY, accuracy: 0.5)
         XCTAssertEqual(frame.maxX, screen.maxX)
     }

@@ -61,14 +61,26 @@ test("view uses a fixed edge pill without collapsed metric wings", () => {
   );
 });
 
-test("edge flush shape needs no curl content inset", () => {
-  assert.match(viewSource, /edgeContentInset/);
-  assert.match(viewSource, /let edgeContentInset: CGFloat = 0/);
-  assert.match(policySource, /edgeCurlExpanded: CGFloat = 0/);
-  assert.match(policySource, /edgeCurlIdeal: CGFloat = 0/);
+test("edge shape uses gentle isotropic curl with content inset", () => {
+  assert.match(viewSource, /edgeContentInsetX/);
+  assert.match(viewSource, /edgeContentInsetTop/);
+  assert.match(viewSource, /edgeContentInsetBottom/);
+  assert.match(viewSource, /edgeExpandedContentInset/);
+  // Inset must be inside the fixed islandWidth (pad-then-frame), never grow
+  // chrome past the trailing reveal mask. Vertical is asymmetric (top > bottom).
+  assert.match(viewSource, /\.padding\(\.top, edgeContentInsetTop\)[\s\S]*?\.padding\(\.bottom, edgeContentInsetBottom\)[\s\S]*?\.padding\(\.horizontal, edgeContentInsetX\)[\s\S]*?\.frame\(width: islandWidth/);
+
+  assert.match(viewSource, /EdgeNotchShape\(curlRadius:/);
+  assert.match(policySource, /edgeCurlExpanded: CGFloat = 18/);
+  assert.match(policySource, /edgeCurlIdeal: CGFloat = 8/);
+  assert.match(policySource, /edgeExpandedContentInset/);
+  assert.match(policySource, /edgeExpandedContentInsetTop/);
+  assert.match(policySource, /edgeExpandedContentInsetBottom/);
+  assert.match(policySource, /edgeVerticalOffsetKey/);
   assert.match(policySource, /edgePanelFrame/);
-  // Panel must center vertically for mid-bezel placement on tall displays.
+  // Default rest still centers; offset shifts within clamp.
   assert.match(policySource, /\(available - height\) \/ 2/);
+  assert.match(policySource, /clampEdgeVerticalOffset/);
 });
 
 test("controller uses CodeNotch-like unfold spring for edge expand", () => {
@@ -76,7 +88,7 @@ test("controller uses CodeNotch-like unfold spring for edge expand", () => {
   assert.match(controllerSource, /state\.placement == \.edge/);
 });
 
-test("edge shape is right-flush rounded rect without bezel flare", () => {
+test("edge shape is gentle isotropic curl without stretched ears", () => {
   const shape = fs.readFileSync(
     path.join(root, "TokenTrackerBar/TokenTrackerBar/Views/EdgeNotchShape.swift"),
     "utf8",
@@ -86,13 +98,14 @@ test("edge shape is right-flush rounded rect without bezel flare", () => {
   assert.match(shape, /response: 0\.62/);
   assert.match(shape, /dampingFraction: 0\.72/);
   assert.match(shape, /circleReach/);
-  assert.doesNotMatch(shape, /fluidTurn/, "bezel flare / fluidTurn removed");
-  assert.doesNotMatch(shape, /filletRamp/, "filletRamp removed with flare");
-  assert.doesNotMatch(shape, /curlAlong/, "no along-edge ears");
-  assert.doesNotMatch(shape, /curlRadius/, "curlRadius removed from shape");
+  assert.match(shape, /var curlRadius/);
+  assert.doesNotMatch(shape, /fluidTurn/, "no fluidTurn ear path");
+  assert.doesNotMatch(shape, /filletRamp/, "no filletRamp");
+  // Along-edge run must stay isotropic (curl, not curl*3 stretch).
+  assert.doesNotMatch(shape, /curlDepth \* 3/, "no along-stretch ears");
   assert.match(policySource, /edgeCurlRadius/);
   assert.match(policySource, /edgeCornerRadius/);
-  assert.match(policySource, /edgeCurlIdeal: CGFloat = 0/);
+  assert.match(policySource, /edgeCurlIdeal: CGFloat = 8/);
 });
 
 test("collapsed edge chrome has no drop shadow or stroke AA dirt", () => {
@@ -124,4 +137,13 @@ test("Labs settings offers island vs edge segmented control", () => {
   assert.match(labsSource, /dynamicIslandPlacement/);
   assert.match(labsSource, /SegmentedControl/);
   assert.match(labsSource, /settings\.labs\.island_placement/);
+});
+
+test("controller long-press drag repositions edge vertically", () => {
+  assert.match(controllerSource, /installEdgeDragMonitors/);
+  assert.match(controllerSource, /handleEdgeMouseDown/);
+  assert.match(controllerSource, /beginEdgeDrag/);
+  assert.match(controllerSource, /writeEdgeVerticalOffset/);
+  assert.match(controllerSource, /edgeLongPressDuration/);
+  assert.match(controllerSource, /verticalOffset: edgeVerticalOffset/);
 });

@@ -1,24 +1,33 @@
 import SwiftUI
 
-/// Right-edge flush silhouette: a rounded rect welded square into the bezel.
+/// Right-edge "welded to the bezel" silhouette inspired by CodeNotch's
+/// `SideNotchShape`, without cutout / dip / four-edge transforms.
 ///
 /// Canonical layout: `rect.width` is depth into the screen, `rect.height` is
-/// length along the edge, and `rect.maxX` is the physical screen edge. Top and
-/// bottom run straight into the bezel at 90°; only the inward (left) corners
-/// are rounded. No concave bezel flares / ears.
+/// length along the edge, and `rect.maxX` is the physical screen edge.
+///
+/// Middle path (not a plain flush rounded-rect, not stretched flare ears):
+/// a modest *isotropic* concave fillet (`curlRadius`) eases each end into the
+/// bezel, then a convex inward corner finishes the body. Fillet depth and
+/// along-edge run stay equal — never `curlAlong ≈ 3×depth` — so the join
+/// reads as one organic weld rather than lobes sticking out along the edge.
 struct EdgeNotchShape: Shape {
+    /// Inverse curve where each end meets the bezel (CodeNotch curl / fillet).
+    var curlRadius: CGFloat
     /// Convex corner on the inward (screen-facing) side.
     var cornerRadius: CGFloat
-    /// Hairline of black pushed *past* the bezel so no wallpaper seam shows.
-    /// Does not extend the visible body along the edge (no ears).
+    /// Hairline of black pushed past the bezel so no wallpaper seam shows.
     var bezelHidden: CGFloat = 1
 
-    var animatableData: CGFloat {
-        get { cornerRadius }
-        set { cornerRadius = newValue }
+    var animatableData: AnimatablePair<CGFloat, CGFloat> {
+        get { AnimatablePair(curlRadius, cornerRadius) }
+        set {
+            curlRadius = newValue.first
+            cornerRadius = newValue.second
+        }
     }
 
-    /// Bézier handle reach for a circular quarter-turn (inward corners only).
+    /// Bézier handle reach for a circular quarter-turn.
     private static let circleReach: CGFloat = 0.5523
 
     func path(in rect: CGRect) -> Path {
@@ -26,56 +35,94 @@ struct EdgeNotchShape: Shape {
         let length = max(0, rect.height)
         guard depth > 0.5, length > 0.5 else { return Path(rect) }
 
+        // Clamp order: corner first, then hidden band, then isotropic curl from
+        // what remains. Thin resting pills (~10 pt) keep round inward corners;
+        // curl collapses to a soft ~3–4 pt weld instead of stretched ears.
         let corner = min(max(0, cornerRadius), depth / 2, length / 4)
-        let hidden = max(0, bezelHidden)
-        // Bezel is the right edge of the shape; optional hairline past it.
+        let hidden = min(max(0, bezelHidden), max(0, depth - corner - 0.5))
+        let curl = min(
+            max(0, curlRadius),
+            max(0, depth - corner - hidden),
+            length / 4
+        )
+        let bodyTop = rect.minY + curl
+        let bodyBottom = rect.maxY - curl
         let bezelX = rect.maxX
-        let outerX = bezelX + hidden
         let inwardX = rect.minX
-        let topY = rect.minY
-        let bottomY = rect.maxY
 
         var path = Path()
-        // Top-right: start past the bezel (hidden) or on it, then flush left.
-        path.move(to: CGPoint(x: outerX, y: topY))
-        // Top edge runs straight into the bezel — square join, no crook.
-        path.addLine(to: CGPoint(x: inwardX + corner, y: topY))
-        // Top inward corner — circular arc.
+        // Top bezel tip.
+        path.move(to: CGPoint(x: bezelX, y: rect.minY))
+        if hidden > 0 {
+            path.addLine(to: CGPoint(x: bezelX - hidden, y: rect.minY))
+        }
+        // Top fillet: bezel → body (isotropic quarter-turn, no along-stretch).
+        if curl > 0.5 {
+            let from = path.currentPoint ?? CGPoint(x: bezelX - hidden, y: rect.minY)
+            let flareEnd = CGPoint(x: bezelX - hidden - curl, y: bodyTop)
+            path.addCurve(
+                to: flareEnd,
+                control1: CGPoint(x: from.x, y: from.y + curl * Self.circleReach),
+                control2: CGPoint(x: flareEnd.x + curl * Self.circleReach, y: flareEnd.y)
+            )
+        }
+        // Top inward corner.
+        let topCornerStart = CGPoint(x: inwardX + corner, y: bodyTop)
+        path.addLine(to: topCornerStart)
         if corner > 0.5 {
             path.addCurve(
-                to: CGPoint(x: inwardX, y: topY + corner),
+                to: CGPoint(x: inwardX, y: bodyTop + corner),
                 control1: CGPoint(
-                    x: inwardX + corner - corner * Self.circleReach,
-                    y: topY
+                    x: topCornerStart.x - corner * Self.circleReach,
+                    y: topCornerStart.y
                 ),
                 control2: CGPoint(
                     x: inwardX,
-                    y: topY + corner - corner * Self.circleReach
+                    y: bodyTop + corner - corner * Self.circleReach
                 )
             )
         } else {
-            path.addLine(to: CGPoint(x: inwardX, y: topY))
+            path.addLine(to: CGPoint(x: inwardX, y: bodyTop))
         }
         // Inward straight edge.
-        path.addLine(to: CGPoint(x: inwardX, y: bottomY - corner))
+        path.addLine(to: CGPoint(x: inwardX, y: bodyBottom - corner))
         // Bottom inward corner.
         if corner > 0.5 {
             path.addCurve(
-                to: CGPoint(x: inwardX + corner, y: bottomY),
+                to: CGPoint(x: inwardX + corner, y: bodyBottom),
                 control1: CGPoint(
                     x: inwardX,
-                    y: bottomY - corner + corner * Self.circleReach
+                    y: bodyBottom - corner + corner * Self.circleReach
                 ),
                 control2: CGPoint(
                     x: inwardX + corner - corner * Self.circleReach,
-                    y: bottomY
+                    y: bodyBottom
                 )
             )
         } else {
-            path.addLine(to: CGPoint(x: inwardX, y: bottomY))
+            path.addLine(to: CGPoint(x: inwardX, y: bodyBottom))
         }
-        // Bottom edge straight to (and past) the bezel — square join.
-        path.addLine(to: CGPoint(x: outerX, y: bottomY))
+        // Bottom fillet back out to the bezel.
+        if curl > 0.5 {
+            let flareStart = CGPoint(x: bezelX - hidden - curl, y: bodyBottom)
+            path.addLine(to: flareStart)
+            let flareEnd = CGPoint(x: bezelX - hidden, y: rect.maxY)
+            path.addCurve(
+                to: flareEnd,
+                control1: CGPoint(
+                    x: flareStart.x + curl * Self.circleReach,
+                    y: flareStart.y
+                ),
+                control2: CGPoint(
+                    x: flareEnd.x,
+                    y: flareEnd.y - curl * Self.circleReach
+                )
+            )
+        } else {
+            path.addLine(to: CGPoint(x: bezelX - hidden, y: bodyBottom))
+            path.addLine(to: CGPoint(x: bezelX - hidden, y: rect.maxY))
+        }
+        path.addLine(to: CGPoint(x: bezelX, y: rect.maxY))
         path.closeSubpath()
         return path
     }
