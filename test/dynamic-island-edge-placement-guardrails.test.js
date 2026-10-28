@@ -71,7 +71,7 @@ test("edge shape uses gentle isotropic curl with content inset", () => {
     /edgeCurl \+ 4/,
     "horizontal inset must not pad with curl+4 (left gutter)",
   );
-  assert.match(policySource, /edgeExpandedContentInset: CGFloat = 10/);
+  assert.match(policySource, /edgeExpandedContentInset: CGFloat = 6/);
   assert.match(policySource, /edgeExpandedContentInsetTop: CGFloat = 12/);
   assert.match(policySource, /edgeExpandedContentInsetBottom: CGFloat = 18/);
   // Inset must be inside the fixed islandWidth (pad-then-frame), never grow

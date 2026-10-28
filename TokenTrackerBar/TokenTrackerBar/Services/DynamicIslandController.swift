@@ -343,6 +343,11 @@ final class DynamicIslandController: NSObject {
             panel.orderFrontRegardless()
             acceptsIslandInteraction = true
             panel.updateHitRegion()
+            // Same QA expand hook as the animated path (do not skip on Reduce Motion).
+            if UserDefaults.standard.bool(forKey: "DynamicIslandDebugForceExpanded"),
+               state.placement == .edge {
+                expand()
+            }
             return
         }
 
@@ -465,6 +470,11 @@ final class DynamicIslandController: NSObject {
             cancelEdgeWake()
             // A menu is tracking — keep the island open; endMenuHold decides.
             guard menuHoldCount == 0 else { return }
+            // QA force-expanded screenshots must not auto-collapse on mouse exit.
+            if UserDefaults.standard.bool(forKey: "DynamicIslandDebugForceExpanded"),
+               state.placement == .edge {
+                return
+            }
             let item = DispatchWorkItem { [weak self] in self?.collapse() }
             collapseWorkItem = item
             DispatchQueue.main.asyncAfter(deadline: .now() + Self.collapseDelay, execute: item)

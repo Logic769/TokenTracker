@@ -644,7 +644,7 @@ struct DynamicIslandView: View {
             .help(Strings.menuSettings)
             .padding(.leading, 8)
         }
-        .padding(.horizontal, state.placement == .edge ? 10 : 14)
+        .padding(.horizontal, state.placement == .edge ? 8 : 14)
         .frame(height: headerHeight)
     }
 
@@ -683,7 +683,7 @@ struct DynamicIslandView: View {
 
             FooterView(horizontalPadding: 4, verticalPadding: 2)
         }
-        .padding(.horizontal, state.placement == .edge ? 10 : 14)
+        .padding(.horizontal, state.placement == .edge ? 8 : 14)
         .padding(.top, state.placement == .edge ? 6 : 10)
         .padding(.bottom, state.placement == .edge ? 8 : 10)
     }

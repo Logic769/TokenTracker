@@ -98,7 +98,7 @@ enum DynamicIslandPlacementPolicy {
     /// Horizontal breathing room inside the expanded edge card so labels clear
     /// the inward corners. Curl is a bezel fillet (not leading clearance) —
     /// do not pad with `curl + N` or the left side grows a vacant black gutter.
-    static let edgeExpandedContentInset: CGFloat = 10
+    static let edgeExpandedContentInset: CGFloat = 6
     /// Top clearance so the header clears the inward corner without a cavern
     /// of empty black that reads as a murky top mask.
     static let edgeExpandedContentInsetTop: CGFloat = 12
