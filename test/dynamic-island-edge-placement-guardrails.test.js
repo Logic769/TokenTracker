@@ -61,9 +61,11 @@ test("view uses a fixed edge pill without collapsed metric wings", () => {
   );
 });
 
-test("expanded edge content is inset for EdgeNotch curl", () => {
+test("edge flush shape needs no curl content inset", () => {
   assert.match(viewSource, /edgeContentInset/);
-  assert.match(viewSource, /edgeCurlExpanded/);
+  assert.match(viewSource, /let edgeContentInset: CGFloat = 0/);
+  assert.match(policySource, /edgeCurlExpanded: CGFloat = 0/);
+  assert.match(policySource, /edgeCurlIdeal: CGFloat = 0/);
   assert.match(policySource, /edgePanelFrame/);
   // Panel must center vertically for mid-bezel placement on tall displays.
   assert.match(policySource, /\(available - height\) \/ 2/);
@@ -74,7 +76,7 @@ test("controller uses CodeNotch-like unfold spring for edge expand", () => {
   assert.match(controllerSource, /state\.placement == \.edge/);
 });
 
-test("edge shape + motion files exist", () => {
+test("edge shape is right-flush rounded rect without bezel flare", () => {
   const shape = fs.readFileSync(
     path.join(root, "TokenTrackerBar/TokenTrackerBar/Views/EdgeNotchShape.swift"),
     "utf8",
@@ -83,21 +85,24 @@ test("edge shape + motion files exist", () => {
   assert.match(shape, /enum EdgeNotchMotion/);
   assert.match(shape, /response: 0\.62/);
   assert.match(shape, /dampingFraction: 0\.72/);
-  assert.match(shape, /fluidTurn/);
-  assert.match(shape, /filletRamp/);
+  assert.match(shape, /circleReach/);
+  assert.doesNotMatch(shape, /fluidTurn/, "bezel flare / fluidTurn removed");
+  assert.doesNotMatch(shape, /filletRamp/, "filletRamp removed with flare");
+  assert.doesNotMatch(shape, /curlAlong/, "no along-edge ears");
+  assert.doesNotMatch(shape, /curlRadius/, "curlRadius removed from shape");
   assert.match(policySource, /edgeCurlRadius/);
   assert.match(policySource, /edgeCornerRadius/);
+  assert.match(policySource, /edgeCurlIdeal: CGFloat = 0/);
 });
 
 test("collapsed edge chrome has no drop shadow or stroke AA dirt", () => {
-  // Shadow/stroke in the concave bezel-flare crooks caused the "两片发暗"
-  // patches. Collapsed must gate both to expanded-only.
+  // Collapsed must gate shadow/stroke to expanded-only (flush join stays clean).
   assert.match(viewSource, /opacity\(expanded \? 0\.28 : 0\)/);
   assert.match(viewSource, /radius: expanded \? 14 : 0/);
   assert.match(
     viewSource,
     /if expanded \{[\s\S]*?edgeShape[\s\S]*?\.stroke\(/,
-    "expanded edge may keep a light rim; collapsed must not stroke the flare",
+    "expanded edge may keep a light rim; collapsed must not stroke",
   );
 });
 

@@ -46,14 +46,13 @@ enum DynamicIslandPlacementPolicy {
 
     // MARK: - Shape radii (fed into `EdgeNotchShape`)
 
-    /// Ideal curl / corner when the shape is deep enough. On the thin resting
-    /// pill, `EdgeNotchShape` claims corner → bezelHidden → curl *depth*, then
-    /// may stretch the along-edge flare into a gentle ellipse (`fluidTurn`) so
-    /// the bezel weld is not a stiff 4 pt circular crook.
-    static let edgeCurlIdeal: CGFloat = 38
+    /// Bezel-flare curl is unused: the edge pill is a right-flush rounded rect
+    /// (square into the screen edge, round only on the inward side). Kept at 0
+    /// so call sites / guardrails can assert curl is off.
+    static let edgeCurlIdeal: CGFloat = 0
     static let edgeCornerIdeal: CGFloat = 14
-    /// Expanded card uses a smaller bezel fillet + island-matching corner.
-    static let edgeCurlExpanded: CGFloat = 14
+    /// Expanded card: still no bezel flare; island-matching inward corner.
+    static let edgeCurlExpanded: CGFloat = 0
     static let edgeCornerExpanded: CGFloat = 22
 
     static func placement(from defaults: UserDefaults = .standard) -> DynamicIslandPlacement {
@@ -86,7 +85,7 @@ enum DynamicIslandPlacementPolicy {
         CGSize(width: edgePillDepth, height: edgePillLength)
     }
 
-    /// Curl radius for the current edge chrome state.
+    /// Curl radius for the current edge chrome state. Always 0 — flare removed.
     static func edgeCurlRadius(isExpanded: Bool) -> CGFloat {
         isExpanded ? edgeCurlExpanded : edgeCurlIdeal
     }

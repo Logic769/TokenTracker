@@ -45,16 +45,18 @@ final class DynamicIslandPlacementPolicyTests: XCTestCase {
         XCTAssertEqual(size.height, 80)
     }
 
-    func testEdgeShapeRadiiDifferCollapsedVsExpanded() {
-        XCTAssertGreaterThan(
-            DynamicIslandPlacementPolicy.edgeCurlRadius(isExpanded: false),
-            DynamicIslandPlacementPolicy.edgeCurlRadius(isExpanded: true)
-        )
+    func testEdgeShapeRadiiFlushBezelNoCurl() {
+        // Bezel flare removed — curl is unused at rest and expanded.
+        XCTAssertEqual(DynamicIslandPlacementPolicy.edgeCurlRadius(isExpanded: false), 0)
+        XCTAssertEqual(DynamicIslandPlacementPolicy.edgeCurlRadius(isExpanded: true), 0)
+        XCTAssertEqual(DynamicIslandPlacementPolicy.edgeCurlIdeal, 0)
+        XCTAssertEqual(DynamicIslandPlacementPolicy.edgeCurlExpanded, 0)
         XCTAssertLessThan(
             DynamicIslandPlacementPolicy.edgeCornerRadius(isExpanded: false),
             DynamicIslandPlacementPolicy.edgeCornerRadius(isExpanded: true)
         )
         XCTAssertEqual(DynamicIslandPlacementPolicy.edgeCornerRadius(isExpanded: true), 22)
+        XCTAssertEqual(DynamicIslandPlacementPolicy.edgeCornerRadius(isExpanded: false), 14)
     }
 
     func testEdgePanelFramePinsToRightEdgeAndCentersVertically() {

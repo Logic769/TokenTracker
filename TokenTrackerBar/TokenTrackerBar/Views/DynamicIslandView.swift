@@ -83,9 +83,9 @@ struct DynamicIslandView: View {
         let islandWidth = expanded
             ? max(DynamicIslandGeometry.expandedWidth, geo.collapsedWidth)
             : geo.collapsedWidth + wakeBoost
-        // Island mode keeps the native notch silhouette. Edge mode uses the
-        // CodeNotch-inspired bezel-welded flare (`EdgeNotchShape`) for both
-        // collapsed and expanded so the spring morphs one concrete shape.
+        // Island mode keeps the native notch silhouette. Edge mode uses a
+        // right-flush rounded rect (`EdgeNotchShape`) for both collapsed and
+        // expanded so the spring morphs one concrete shape.
         let shoulderRadius: CGFloat = {
             if isEdge { return 0 }
             return expanded ? CGFloat(8) : min(6, geo.collapsedHeight / 4)
@@ -106,16 +106,11 @@ struct DynamicIslandView: View {
             topShoulderRadius: shoulderRadius,
             bottomRadius: bottomRadius
         )
-        let edgeCurl = DynamicIslandPlacementPolicy.edgeCurlRadius(isExpanded: expanded)
         let edgeCorner = DynamicIslandPlacementPolicy.edgeCornerRadius(isExpanded: expanded)
-        let edgeShape = EdgeNotchShape(curlRadius: edgeCurl, cornerRadius: edgeCorner)
+        let edgeShape = EdgeNotchShape(cornerRadius: edgeCorner)
 
-        // EdgeNotchShape's top/bottom curl eats into the content rect near the
-        // bezel; give expanded edge chrome matching vertical inset so header
-        // controls are not clipped by the flare.
-        let edgeContentInset: CGFloat = (isEdge && expanded)
-            ? DynamicIslandPlacementPolicy.edgeCurlExpanded
-            : 0
+        // Flush square bezel join — no flare crook, so no vertical curl inset.
+        let edgeContentInset: CGFloat = 0
         let content = VStack(spacing: 0) {
             if !expanded {
                 if DynamicIslandPlacementPolicy.showsCollapsedMetrics(for: state.placement) {
@@ -146,11 +141,10 @@ struct DynamicIslandView: View {
         // rect through AnyView, or the spring has nothing continuous to morph.
         let chrome: AnyView = {
             if isEdge {
-                // Collapsed chrome: no drop shadow and no stroke. Shadow + AA
-                // stroke were filling the concave bezel-flare crooks with dark
-                // patches ("两片发暗") outside the opaque body. Expanded keeps
-                // a light rim + soft inward shadow; wake only deepens the body
-                // and brightens the quiet dots (see edgeCollapsedPill).
+                // Collapsed chrome: no drop shadow and no stroke (avoids AA
+                // dirt at the flush bezel join). Expanded keeps a light rim +
+                // soft inward shadow; wake only deepens the body and brightens
+                // the quiet dots (see edgeCollapsedPill).
                 return AnyView(
                     content
                         .clipShape(edgeShape)
@@ -242,9 +236,8 @@ struct DynamicIslandView: View {
 
     /// Fixed right-edge collapsed chrome: quiet 3-dot stack on a solid black
     /// `EdgeNotchShape` body. No vertical specular hairline and no collapsed
-    /// rim/shadow (those dirtied the bezel-flare crooks). Wake (via
-    /// `state.isEdgeWaking`) brightens the dots and gently scales them before
-    /// unfold.
+    /// rim/shadow. Wake (via `state.isEdgeWaking`) brightens the dots and
+    /// gently scales them before unfold.
     private var edgeCollapsedPill: some View {
         let geo = state.geometry
         let waking = state.isEdgeWaking
