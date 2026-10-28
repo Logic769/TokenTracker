@@ -62,14 +62,19 @@ final class DynamicIslandPlacementPolicyTests: XCTestCase {
         )
         XCTAssertEqual(DynamicIslandPlacementPolicy.edgeCornerRadius(isExpanded: true), 22)
         XCTAssertEqual(DynamicIslandPlacementPolicy.edgeCornerRadius(isExpanded: false), 14)
-        XCTAssertEqual(DynamicIslandPlacementPolicy.edgeExpandedContentInset, 16)
-        XCTAssertEqual(DynamicIslandPlacementPolicy.edgeExpandedContentInsetTop, 28)
-        XCTAssertEqual(DynamicIslandPlacementPolicy.edgeExpandedContentInsetBottom, 8)
-        // Top must stay roomier than bottom — user-visible imbalance otherwise.
-        XCTAssertGreaterThan(
+        XCTAssertEqual(DynamicIslandPlacementPolicy.edgeExpandedContentInset, 10)
+        XCTAssertEqual(DynamicIslandPlacementPolicy.edgeExpandedContentInsetTop, 12)
+        XCTAssertEqual(DynamicIslandPlacementPolicy.edgeExpandedContentInsetBottom, 18)
+        // Bottom must clear the expanded curl; top stays modest (no black cavern).
+        XCTAssertGreaterThanOrEqual(
+            DynamicIslandPlacementPolicy.edgeExpandedContentInsetBottom,
+            DynamicIslandPlacementPolicy.edgeCurlExpanded
+        )
+        XCTAssertLessThanOrEqual(
             DynamicIslandPlacementPolicy.edgeExpandedContentInsetTop,
             DynamicIslandPlacementPolicy.edgeExpandedContentInsetBottom
         )
+        XCTAssertLessThanOrEqual(DynamicIslandPlacementPolicy.edgeExpandedContentInset, 10)
     }
 
     func testEdgeVerticalOffsetPersistsAndClamps() throws {

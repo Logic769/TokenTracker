@@ -66,8 +66,16 @@ test("edge shape uses gentle isotropic curl with content inset", () => {
   assert.match(viewSource, /edgeContentInsetTop/);
   assert.match(viewSource, /edgeContentInsetBottom/);
   assert.match(viewSource, /edgeExpandedContentInset/);
+  assert.doesNotMatch(
+    viewSource,
+    /edgeCurl \+ 4/,
+    "horizontal inset must not pad with curl+4 (left gutter)",
+  );
+  assert.match(policySource, /edgeExpandedContentInset: CGFloat = 10/);
+  assert.match(policySource, /edgeExpandedContentInsetTop: CGFloat = 12/);
+  assert.match(policySource, /edgeExpandedContentInsetBottom: CGFloat = 18/);
   // Inset must be inside the fixed islandWidth (pad-then-frame), never grow
-  // chrome past the trailing reveal mask. Vertical is asymmetric (top > bottom).
+  // chrome past the trailing reveal mask. Vertical is balanced (bottom >= top).
   assert.match(viewSource, /\.padding\(\.top, edgeContentInsetTop\)[\s\S]*?\.padding\(\.bottom, edgeContentInsetBottom\)[\s\S]*?\.padding\(\.horizontal, edgeContentInsetX\)[\s\S]*?\.frame\(width: islandWidth/);
 
   assert.match(viewSource, /EdgeNotchShape\(curlRadius:/);
@@ -110,8 +118,8 @@ test("edge shape is gentle isotropic curl without stretched ears", () => {
 
 test("collapsed edge chrome has no drop shadow or stroke AA dirt", () => {
   // Collapsed must gate shadow/stroke to expanded-only (flush join stays clean).
-  assert.match(viewSource, /opacity\(expanded \? 0\.28 : 0\)/);
-  assert.match(viewSource, /radius: expanded \? 14 : 0/);
+  assert.match(viewSource, /opacity\(expanded \? 0\.22 : 0\)/);
+  assert.match(viewSource, /radius: expanded \? 12 : 0/);
   assert.match(
     viewSource,
     /if expanded \{[\s\S]*?edgeShape[\s\S]*?\.stroke\(/,

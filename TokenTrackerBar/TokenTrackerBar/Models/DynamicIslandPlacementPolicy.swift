@@ -96,15 +96,15 @@ enum DynamicIslandPlacementPolicy {
     }
 
     /// Horizontal breathing room inside the expanded edge card so labels clear
-    /// the inward corners / fillet. Shape silhouette stays organic; only the
-    /// *content* is padded. Combined at the call site with `curlRadius + 4`.
-    static let edgeExpandedContentInset: CGFloat = 16
-    /// Top clearance so the header is not cramped under the inward corner.
-    /// Larger than bottom — screenshots showed title glued to the rim.
-    static let edgeExpandedContentInsetTop: CGFloat = 28
-    /// Bottom clearance under the footer. Kept tight so bottom-left does not
-    /// read as a vacant black cavern under "Open Dashboard".
-    static let edgeExpandedContentInsetBottom: CGFloat = 8
+    /// the inward corners. Curl is a bezel fillet (not leading clearance) —
+    /// do not pad with `curl + N` or the left side grows a vacant black gutter.
+    static let edgeExpandedContentInset: CGFloat = 10
+    /// Top clearance so the header clears the inward corner without a cavern
+    /// of empty black that reads as a murky top mask.
+    static let edgeExpandedContentInsetTop: CGFloat = 12
+    /// Bottom clearance under the footer — at least the expanded curl so
+    /// "Open Dashboard" / Quit sit above the bezel fillet, not inside it.
+    static let edgeExpandedContentInsetBottom: CGFloat = 18
 
     /// UserDefaults key for the persisted mid-edge vertical offset (points,
     /// AppKit: positive = up from the default vertically-centered rest).

@@ -116,13 +116,11 @@ struct DynamicIslandView: View {
         // hit rect, and EdgeNotchShape stay aligned — padding outside the
         // frame previously grew chrome past revealWidth and chopped the
         // inward (leading) side ("Plan" → "Ian").
-        // Horizontal must clear curl/corners; vertical is asymmetric — more
-        // top breathing room, tight bottom so the footer is not floating.
+        // Horizontal clears the inward corner only (not curl+N). Vertical is
+        // balanced: modest top, bottom ≥ expanded curl so the footer is not
+        // clipped into the bezel fillet (that read as a murky black veil).
         let edgeContentInsetX: CGFloat = (isEdge && expanded)
-            ? max(
-                DynamicIslandPlacementPolicy.edgeExpandedContentInset,
-                edgeCurl + 4
-            )
+            ? DynamicIslandPlacementPolicy.edgeExpandedContentInset
             : 0
         let edgeContentInsetTop: CGFloat = (isEdge && expanded)
             ? DynamicIslandPlacementPolicy.edgeExpandedContentInsetTop
@@ -146,7 +144,7 @@ struct DynamicIslandView: View {
                     .transition(.opacity)
             }
         }
-        // Edge expanded: pad first (asymmetric vertical), then lock outer
+        // Edge expanded: pad first (balanced vertical), then lock outer
         // width so content shrinks into the shape instead of pushing past
         // the trailing reveal mask.
         .padding(.top, edgeContentInsetTop)
@@ -176,9 +174,9 @@ struct DynamicIslandView: View {
                         .background(
                             edgeShape.fill(Color.black)
                                 .shadow(
-                                    color: .black.opacity(expanded ? 0.28 : 0),
-                                    radius: expanded ? 14 : 0,
-                                    x: expanded ? -4 : 0,
+                                    color: .black.opacity(expanded ? 0.22 : 0),
+                                    radius: expanded ? 12 : 0,
+                                    x: expanded ? -3 : 0,
                                     y: 0
                                 )
                         )
@@ -646,7 +644,7 @@ struct DynamicIslandView: View {
             .help(Strings.menuSettings)
             .padding(.leading, 8)
         }
-        .padding(.horizontal, 14)
+        .padding(.horizontal, state.placement == .edge ? 10 : 14)
         .frame(height: headerHeight)
     }
 
@@ -675,16 +673,37 @@ struct DynamicIslandView: View {
                 UsageLimitsView(limits: viewModel.usageLimits, subscriptions: viewModel.subscriptions)
             }
             .frame(maxHeight: DynamicIslandLayoutPolicy.limitsHeight(panelHeight: state.panelSize.height))
+            // macOS soft scroll-edge fades read as murky black bands inside the
+            // black edge card; harden/hide them when placement is edge.
+            .modifier(EdgePanelScrollEdgeChrome(enabled: state.placement == .edge))
 
             Divider()
                 .opacity(0.4)
                 .padding(.vertical, 2)
 
-            FooterView(horizontalPadding: 4, verticalPadding: state.placement == .edge ? 0 : 2)
+            FooterView(horizontalPadding: 4, verticalPadding: 2)
         }
-        .padding(.horizontal, 14)
-        .padding(.top, state.placement == .edge ? 8 : 10)
-        .padding(.bottom, state.placement == .edge ? 4 : 10)
+        .padding(.horizontal, state.placement == .edge ? 10 : 14)
+        .padding(.top, state.placement == .edge ? 6 : 10)
+        .padding(.bottom, state.placement == .edge ? 8 : 10)
+    }
+}
+
+/// Soft macOS ScrollView edge fades look like translucent black masks on the
+/// solid black edge card. Prefer a hard/hidden edge chrome when available.
+private struct EdgePanelScrollEdgeChrome: ViewModifier {
+    let enabled: Bool
+
+    func body(content: Content) -> some View {
+        if enabled {
+            if #available(macOS 15.0, *) {
+                content.scrollEdgeEffectStyle(.hard, for: .all)
+            } else {
+                content
+            }
+        } else {
+            content
+        }
     }
 }
 
