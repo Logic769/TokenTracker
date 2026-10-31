@@ -13,11 +13,13 @@ import { ProviderIcon } from "../ui/dashboard/components/ProviderIcon.jsx";
 //   google     — Google's incidents.json feed, filtered by service name
 //                (covers Gemini; Google products share one feed)
 //
-// Providers deliberately absent: Grok + DeepSeek front their status pages
-// with bot checks (browser fetch gets 403/HTML), and z.ai / Kiro / Qoder /
-// OpenCode expose no public status API at all. Only providers TokenTracker
-// actually tracks belong here — this page explains "why is MY provider's
-// data red", it is not a general status aggregator.
+// One provider is special: DeepSeek has no public JSON API and no CORS, so it
+// is relayed by the local app through /api/deepseek-status (see
+// src/lib/provider-status.js). On the hosted web build without a local backend
+// that probe renders Unreachable. Grok / z.ai / Kiro / Qoder / OpenCode expose
+// no public status API at all. Only providers TokenTracker actually tracks
+// belong here — this page explains "why is MY provider's data red", it is not a
+// general status aggregator.
 export const STATUS_PROVIDERS = [
   {
     id: "claude",
@@ -93,6 +95,14 @@ export const STATUS_PROVIDERS = [
     icon: "DROID",
     apiUrl: "https://status.factory.ai/api/v2/status.json",
     pageUrl: "https://status.factory.ai",
+  },
+  {
+    id: "deepseek",
+    name: "DeepSeek",
+    icon: "DEEPSEEK",
+    // No public JSON API / no CORS: the local app relays and parses the page.
+    apiUrl: "/api/deepseek-status",
+    pageUrl: "https://status.deepseek.com",
   },
 ];
 
